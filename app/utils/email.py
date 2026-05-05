@@ -61,6 +61,24 @@ async def send_admin_new_order(order_id: str, customer_email: str, total: float,
     await send_email(settings.admin_email, subject, html)
 
 
+async def send_contact_message(name: str, from_email: str, message: str):
+    if not settings.admin_email:
+        return
+    subject = f"New contact message from {name}"
+    html = f"""
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+      <h1 style="color:#0c2a50">New Contact Message</h1>
+      <div style="background:#f0f4ff;border-radius:8px;padding:16px;margin:16px 0">
+        <p style="margin:4px 0"><strong>Name:</strong> {name}</p>
+        <p style="margin:4px 0"><strong>Email:</strong> {from_email}</p>
+      </div>
+      <p style="white-space:pre-wrap;background:#f8f9fa;padding:16px;border-radius:8px;border-left:4px solid #1a4073">{message}</p>
+      <p style="color:#888;font-size:13px;margin-top:24px">Reply directly to {from_email} to respond.</p>
+    </div>
+    """
+    await send_email(settings.admin_email, subject, html)
+
+
 async def send_status_update(customer_email: str, order_id: str, new_status: str):
     STATUS_MESSAGES = {
         "in_review": ("Your order is being reviewed", "Our team is reviewing your image and configuration."),

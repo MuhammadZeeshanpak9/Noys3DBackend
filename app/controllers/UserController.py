@@ -41,14 +41,9 @@ async def submit_contact(request: Request):
         if not name or not email or not message:
             return JSONResponse({"error": "Name, email, and message are required"}, status_code=400)
 
-        contact = {
-            "id": str(uuid4()),
-            "name": name,
-            "email": email,
-            "message": message,
-            "created_at": datetime.utcnow().isoformat()
-        }
-
+        from app.utils.email import send_contact_message
+        import asyncio
+        asyncio.create_task(send_contact_message(name, email, message))
 
         return {"message": "Thank you for your message! We'll get back to you soon."}
     except Exception as e:
