@@ -159,6 +159,32 @@ async def list_all_orders(request: Request, limit: int = 50, offset: int = 0, st
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+async def update_order_status(request: Request, order_id: str):
+    try:
+        admin = _get_current_admin(request)
+        if not admin:
+            return JSONResponse({"error": "Admin access required"}, status_code=403)
+
+        body = await request.json()
+        new_status = body.get("status")
+        valid_statuses = ["pending", "processing", "shipped", "delivered", "cancelled"]
+        if not new_status or new_status not in valid_statuses:
+            return JSONResponse({"error": f"Invalid status. Must be one of: {', '.join(valid_statuses)}"}, status_code=400)
+
+        from datetime import datetime
+        response = supabase.table("orders").update({
+            "status": new_status,
+            "updated_at": datetime.utcnow().isoformat()
+        }).eq("id", order_id).execute()
+
+        if not response.data:
+            return JSONResponse({"error": "Order not found"}, status_code=404)
+
+        return response.data[0]
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 async def get_recent_activity(request: Request, limit: int = 20):
     
     try:

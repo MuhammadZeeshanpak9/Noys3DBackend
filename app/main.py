@@ -346,6 +346,10 @@ async def reset_user_password(request: Request, user_id: str):
 async def list_all_orders(request: Request, limit: int = 50, offset: int = 0, status: str = None):
     return await AdminController.list_all_orders(request, limit=limit, offset=offset, status=status)
 
+@app.patch("/api/v1/admin/orders/{order_id}")
+async def admin_update_order_status(request: Request, order_id: str):
+    return await AdminController.update_order_status(request, order_id)
+
 
 @app.get("/api/v1/admin/activity")
 async def get_recent_activity(request: Request, limit: int = 20):
