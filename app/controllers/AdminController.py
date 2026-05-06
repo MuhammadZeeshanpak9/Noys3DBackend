@@ -172,10 +172,12 @@ async def update_order_status(request: Request, order_id: str):
             return JSONResponse({"error": f"Invalid status. Must be one of: {', '.join(valid_statuses)}"}, status_code=400)
 
         from datetime import datetime
-        response = supabase.table("orders").update({
+        update_data = {
             "status": new_status,
             "updated_at": datetime.utcnow().isoformat()
-        }).eq("id", order_id).execute()
+        }
+
+        response = supabase.table("orders").update(update_data).eq("id", order_id).execute()
 
         if not response.data:
             return JSONResponse({"error": "Order not found"}, status_code=404)
