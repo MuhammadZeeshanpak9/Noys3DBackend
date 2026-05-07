@@ -96,15 +96,25 @@ async def _poll_and_update(generation_id: str, task_id: str, api_key: str):
 
                 if status == "success":
                     output = data.get("output", {})
-                    rendered_image = output.get("rendered_image") or output.get("base_model")
-                    model_url = output.get("model") or output.get("pbr_model")
+                    logger.info(f"Tripo output keys for {generation_id}: {list(output.keys())}")
+                    # Try all known preview image field names across Tripo API versions
+                    rendered_image = (
+                        output.get("rendered_image") or
+                        output.get("base_model") or
+                        output.get("model_thumbnail") or
+                        output.get("thumbnail")
+                    )
+                    model_url = output.get("model") or output.get("pbr_model") or output.get("glb_model")
+                    # If Tripo gave us a model but no preview, use the model URL as image_url
+                    # so the frontend knows generation succeeded (non-empty = done)
+                    final_image_url = rendered_image or model_url or ""
                     supabase.table("generations").update({
-                        "image_url": rendered_image or "",
+                        "image_url": final_image_url,
                         "stl_url": model_url,
                     }).eq("id", generation_id).execute()
                     _active_tasks.pop(generation_id, None)
                     _task_progress.pop(generation_id, None)
-                    logger.info(f"Generation {generation_id} completed via Tripo")
+                    logger.info(f"Generation {generation_id} done — image={bool(rendered_image)} model={bool(model_url)}")
                     return
 
                 if status == "failed":
@@ -251,14 +261,21 @@ async def get_generation(request: Request, generation_id: str):
 
                     if status == "success":
                         output = data.get("output", {})
-                        rendered_image = output.get("rendered_image") or output.get("base_model")
-                        model_url = output.get("model") or output.get("pbr_model")
+                        logger.info(f"On-demand Tripo output keys for {generation_id}: {list(output.keys())}")
+                        rendered_image = (
+                            output.get("rendered_image") or
+                            output.get("base_model") or
+                            output.get("model_thumbnail") or
+                            output.get("thumbnail")
+                        )
+                        model_url = output.get("model") or output.get("pbr_model") or output.get("glb_model")
+                        final_image_url = rendered_image or model_url or ""
                         supabase.table("generations").update({
-                            "image_url": rendered_image or "",
+                            "image_url": final_image_url,
                             "stl_url": model_url,
                         }).eq("id", generation_id).execute()
                         _active_tasks.pop(generation_id, None)
-                        generation["image_url"] = rendered_image or ""
+                        generation["image_url"] = final_image_url
                         generation["stl_url"] = model_url
                     elif status == "failed":
                         supabase.table("generations").update({"image_url": ""}).eq("id", generation_id).execute()
