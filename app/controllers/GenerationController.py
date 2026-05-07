@@ -18,9 +18,9 @@ settings = get_settings()
 TRIPO_API_BASE = "https://api.tripo3d.ai/v2/openapi"
 
 # Maps generation_id → tripo task_id for in-progress generations.
-# Used so get_generation can check Tripo on-demand on every frontend poll,
-# avoiding reliance on a long-running background task that Railway can kill.
 _active_tasks: dict = {}
+# Maps generation_id → last known Tripo progress (0-100).
+_task_progress: dict = {}
 
 
 def _get_current_user(request: Request) -> Optional[dict]:
@@ -103,12 +103,14 @@ async def _poll_and_update(generation_id: str, task_id: str, api_key: str):
                         "stl_url": model_url,
                     }).eq("id", generation_id).execute()
                     _active_tasks.pop(generation_id, None)
+                    _task_progress.pop(generation_id, None)
                     logger.info(f"Generation {generation_id} completed via Tripo")
                     return
 
                 if status == "failed":
                     supabase.table("generations").update({"image_url": ""}).eq("id", generation_id).execute()
                     _active_tasks.pop(generation_id, None)
+                    _task_progress.pop(generation_id, None)
                     logger.warning(f"Tripo task {task_id} failed")
                     return
 
@@ -243,7 +245,9 @@ async def get_generation(request: Request, generation_id: str):
                     )
                     data = resp.json().get("data", {})
                     status = data.get("status")
-                    logger.info(f"On-demand Tripo check for {generation_id}: status={status}")
+                    progress = data.get("progress", 0)
+                    _task_progress[generation_id] = progress
+                    logger.info(f"On-demand Tripo check for {generation_id}: status={status} progress={progress}")
 
                     if status == "success":
                         output = data.get("output", {})
@@ -259,10 +263,13 @@ async def get_generation(request: Request, generation_id: str):
                     elif status == "failed":
                         supabase.table("generations").update({"image_url": ""}).eq("id", generation_id).execute()
                         _active_tasks.pop(generation_id, None)
+                        _task_progress.pop(generation_id, None)
                         generation["image_url"] = ""
             except Exception as e:
                 logger.error(f"On-demand Tripo check failed for {generation_id}: {e}")
 
+        # Attach live progress so frontend can show a real progress bar
+        generation["processing_progress"] = _task_progress.get(generation_id, 0)
         return generation
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

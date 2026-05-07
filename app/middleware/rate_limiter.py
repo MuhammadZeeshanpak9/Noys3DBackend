@@ -75,8 +75,8 @@ class RateLimiter(BaseHTTPMiddleware):
             rate_limit_calls = 10  # 10 requests per minute for auth
             rate_limit_period = 60
 
-        elif "/generations" in path:
-            rate_limit_calls = 5  # 5 requests per minute for generation
+        elif "/generations/generate" in path and request.method == "POST":
+            rate_limit_calls = 5  # 5 generations per minute (Tripo is expensive)
             rate_limit_period = 60
 
         elif request.method in ["POST", "PUT", "DELETE"]:
@@ -144,10 +144,10 @@ class CacheMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         path = request.url.path
-        if "/auth/" in path or "/admin/" in path or path in [
-            "/api/v1/products", 
-            "/api/v1/categories", 
-            "/api/v1/plans", 
+        if "/auth/" in path or "/admin/" in path or "/generations/" in path or path in [
+            "/api/v1/products",
+            "/api/v1/categories",
+            "/api/v1/plans",
             "/api/v1/credit-packs"
         ]:
             return await call_next(request)
