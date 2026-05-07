@@ -279,7 +279,7 @@ async def get_generation(request: Request, generation_id: str):
                             output.get("model_thumbnail") or
                             output.get("thumbnail")
                         )
-                        model_url = output.get("model") or output.get("pbr_model") or output.get("glb_model")
+                        model_url = output.get("model") or output.get("base_model") or output.get("pbr_model") or output.get("glb_model")
                         final_image_url = rendered_image or model_url or ""
                         supabase.table("generations").update({
                             "image_url": final_image_url,
