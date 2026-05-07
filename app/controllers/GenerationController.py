@@ -57,14 +57,15 @@ async def _upload_image_to_tripo(api_key: str, file_bytes: bytes, filename: str)
         return None
 
 
-async def _submit_tripo_task(api_key: str, prompt: str = "", file_token: str = None) -> Optional[str]:
+async def _submit_tripo_task(api_key: str, prompt: str = "", file_token: str = None, file_ext: str = "jpeg") -> Optional[str]:
     """Submit a generation task to Tripo, returns task_id or None on failure."""
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     if file_token:
+        tripo_type = "png" if file_ext in ("png",) else "jpeg"
         payload = {
             "type": "image_to_model",
-            "file": {"type": "jpeg", "file_token": file_token},
+            "file": {"type": tripo_type, "file_token": file_token},
         }
     else:
         payload = {
@@ -86,7 +87,7 @@ async def _poll_and_update(generation_id: str, task_id: str, api_key: str):
     """Background task: polls Tripo every 5s until success/failure, then updates DB."""
     headers = {"Authorization": f"Bearer {api_key}"}
 
-    for _ in range(48):  # ~4 minutes max
+    for _ in range(120):  # ~10 minutes max
         await asyncio.sleep(5)
         try:
             async with httpx.AsyncClient(timeout=15) as client:
@@ -154,13 +155,16 @@ async def generate_model(request: Request, background_tasks: BackgroundTasks):
             file_token = None
 
             # Upload first image to Tripo if provided
+            file_ext = "jpeg"
             if image_files:
                 img = image_files[0]
                 file_bytes = await img.read()
-                file_token = await _upload_image_to_tripo(settings.tripo_api_key, file_bytes, img.filename or "upload.jpg")
+                filename = img.filename or "upload.jpg"
+                file_ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "jpeg"
+                file_token = await _upload_image_to_tripo(settings.tripo_api_key, file_bytes, filename)
 
             # Submit task (image or text)
-            task_id = await _submit_tripo_task(settings.tripo_api_key, prompt=prompt, file_token=file_token)
+            task_id = await _submit_tripo_task(settings.tripo_api_key, prompt=prompt, file_token=file_token, file_ext=file_ext)
 
             if not task_id:
                 return JSONResponse({"error": "Failed to submit generation task. Please try again."}, status_code=500)
