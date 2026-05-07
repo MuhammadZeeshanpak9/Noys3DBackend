@@ -101,6 +101,7 @@ async def _poll_and_update(generation_id: str, task_id: str, api_key: str):
                     # Try all known preview image field names across Tripo API versions
                     rendered_image = (
                         output.get("rendered_image") or
+                        output.get("generated_image") or
                         output.get("base_model") or
                         output.get("model_thumbnail") or
                         output.get("thumbnail")
@@ -268,6 +269,7 @@ async def get_generation(request: Request, generation_id: str):
                         logger.info(f"On-demand Tripo output keys for {generation_id}: {list(output.keys())}")
                         rendered_image = (
                             output.get("rendered_image") or
+                            output.get("generated_image") or
                             output.get("base_model") or
                             output.get("model_thumbnail") or
                             output.get("thumbnail")
