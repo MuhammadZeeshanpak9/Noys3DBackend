@@ -147,47 +147,96 @@ async def delete_category(request: Request, category_id: str):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+def _fetch_media_for_products(product_ids: list) -> dict:
+    """Return {product_id: [media_row, ...]} ordered by sort_order."""
+    if not product_ids:
+        return {}
+    rows = (
+        supabase.table("product_media")
+        .select("*")
+        .in_("product_id", product_ids)
+        .order("sort_order")
+        .execute()
+        .data
+        or []
+    )
+    by_pid: dict = {}
+    for r in rows:
+        by_pid.setdefault(r["product_id"], []).append(r)
+    return by_pid
+
+
+def _replace_product_media(product_id: str, media: list) -> None:
+    """Wipe existing media rows for this product and insert the new list.
+    `media` is a list of {url, media_type, sort_order?} dicts."""
+    supabase.table("product_media").delete().eq("product_id", product_id).execute()
+    if not media:
+        return
+    rows = []
+    for idx, m in enumerate(media):
+        url = (m or {}).get("url")
+        media_type = (m or {}).get("media_type") or "image"
+        if not url:
+            continue
+        rows.append({
+            "id": str(uuid4()),
+            "product_id": product_id,
+            "url": url,
+            "media_type": media_type if media_type in ("image", "video") else "image",
+            "sort_order": int((m or {}).get("sort_order", idx)),
+            "created_at": datetime.utcnow().isoformat(),
+        })
+    if rows:
+        supabase.table("product_media").insert(rows).execute()
+
+
 async def list_products(category: Optional[str] = None, active_only: bool = True):
-    
+
     try:
         query = supabase.table("products").select("*")
-        
+
         if active_only:
             query = query.eq("is_active", True)
-        
+
         if category:
             cat_response = supabase.table("categories").select("id").eq("slug", category).execute()
             if cat_response.data:
                 query = query.eq("category_id", cat_response.data[0]["id"])
-        
+
         response = query.order("created_at", desc=True).execute()
-        return response.data
+        products = response.data or []
+        media_by_pid = _fetch_media_for_products([p["id"] for p in products])
+        for p in products:
+            p["media"] = media_by_pid.get(p["id"], [])
+        return products
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
 async def get_product(product_id: str):
-    
+
     try:
         response = supabase.table("products").select("*").eq("id", product_id).execute()
         if not response.data:
             return JSONResponse({"error": "Product not found"}, status_code=404)
-        return response.data[0]
+        product = response.data[0]
+        product["media"] = _fetch_media_for_products([product_id]).get(product_id, [])
+        return product
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
 async def create_product(request: Request):
-    
+
     try:
         admin = _require_admin(request)
         if not admin:
             return JSONResponse({"error": "Admin access required"}, status_code=403)
-        
+
         body = await request.json()
         name = body.get("name")
         price = body.get("price")
-        
+
         if not name or not price:
             return JSONResponse({"error": "Name and price are required"}, status_code=400)
 
@@ -200,24 +249,41 @@ async def create_product(request: Request):
         if "status" in body:
             is_active = body["status"] == "active"
             body.pop("status", None)
-        
+
+        media = body.pop("media", None)
+
+        # Derive thumbnail (image_url) from the first image in media[] if not provided.
+        image_url = body.get("image_url")
+        if not image_url and isinstance(media, list):
+            for m in media:
+                if (m or {}).get("media_type") == "image" and (m or {}).get("url"):
+                    image_url = m["url"]
+                    break
+
+        product_id = str(uuid4())
         product = {
-            "id": str(uuid4()),
+            "id": product_id,
             "name": name,
             "description": body.get("description"),
             "price": price,
-            "image_url": body.get("image_url"),
+            "image_url": image_url,
             "category_id": category_id or body.get("category_id"),
             "is_active": is_active,
             "created_at": datetime.utcnow().isoformat(),
             "updated_at": datetime.utcnow().isoformat()
         }
-        
+
         import logging
         logging.info(f"Creating product with data: {product}")
-        
+
         response = supabase.table("products").insert(product).execute()
-        return response.data[0]
+        created = response.data[0] if response.data else product
+
+        if isinstance(media, list):
+            _replace_product_media(product_id, media)
+
+        created["media"] = _fetch_media_for_products([product_id]).get(product_id, [])
+        return created
     except Exception as e:
         import logging
         logging.error(f"Error creating product: {str(e)}")
@@ -225,12 +291,12 @@ async def create_product(request: Request):
 
 
 async def update_product(request: Request, product_id: str):
-    
+
     try:
         admin = _require_admin(request)
         if not admin:
             return JSONResponse({"error": "Admin access required"}, status_code=403)
-        
+
         body = await request.json()
 
         if "category_ids" in body:
@@ -241,19 +307,35 @@ async def update_product(request: Request, product_id: str):
         if "status" in body:
             body["is_active"] = body["status"] == "active"
             body.pop("status", None)
-        
-        update_data = {k: v for k, v in body.items() if v is not None}
+
+        media = body.pop("media", None)
+
+        # If client sent media[] but no explicit image_url, sync the thumbnail
+        # to the first image so shop cards stay accurate.
+        if isinstance(media, list) and "image_url" not in body:
+            primary = next(
+                (m["url"] for m in media if (m or {}).get("media_type") == "image" and (m or {}).get("url")),
+                None,
+            )
+            body["image_url"] = primary
+
+        update_data = {k: v for k, v in body.items() if v is not None or k == "image_url"}
         update_data["updated_at"] = datetime.utcnow().isoformat()
 
         import logging
         logging.info(f"Updating product {product_id} with data: {update_data}")
-        
+
         response = supabase.table("products").update(update_data).eq("id", product_id).execute()
-        
+
         if not response.data:
             return JSONResponse({"error": "Product not found"}, status_code=404)
-        
-        return response.data[0]
+
+        if isinstance(media, list):
+            _replace_product_media(product_id, media)
+
+        result = response.data[0]
+        result["media"] = _fetch_media_for_products([product_id]).get(product_id, [])
+        return result
     except Exception as e:
         import logging
         logging.error(f"Error updating product: {str(e)}")

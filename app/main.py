@@ -408,6 +408,51 @@ async def upload_image(file: UploadFile = File(...)):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+# Max video size for product turntable clips. 50 MB is plenty for a short
+# 360° loop and keeps Supabase Storage bandwidth reasonable.
+PRODUCT_VIDEO_MAX_BYTES = 50 * 1024 * 1024
+
+
+@app.post("/api/v1/upload/video")
+async def upload_video(file: UploadFile = File(...)):
+    try:
+        allowed_types = ["video/mp4", "video/webm", "video/quicktime", "video/x-m4v"]
+        is_allowed_ext = file.filename and file.filename.lower().endswith((".mp4", ".webm", ".mov", ".m4v"))
+        if file.content_type not in allowed_types and not is_allowed_ext:
+            return JSONResponse({"error": "Invalid file type. Only MP4, WebM, MOV allowed"}, status_code=400)
+
+        content = await file.read()
+        if len(content) > PRODUCT_VIDEO_MAX_BYTES:
+            return JSONResponse(
+                {"error": f"Video too large. Max {PRODUCT_VIDEO_MAX_BYTES // (1024*1024)} MB."},
+                status_code=400,
+            )
+
+        file_ext = file.filename.split(".")[-1] if file.filename and "." in file.filename else "mp4"
+        unique_filename = f"vid_{uuid.uuid4()}.{file_ext}"
+
+        if settings.supabase_service_key:
+            try:
+                sb = _supabase_storage_client()
+                sb.storage.from_("uploads").upload(
+                    path=unique_filename,
+                    file=content,
+                    file_options={"content-type": file.content_type or "video/mp4", "upsert": "true"},
+                )
+                public_url = sb.storage.from_("uploads").get_public_url(unique_filename)
+                return {"filename": unique_filename, "url": public_url, "content_type": file.content_type, "size": len(content)}
+            except Exception as storage_err:
+                import logging
+                logging.warning(f"Supabase Storage video upload failed, using local: {storage_err}")
+
+        file_path = UPLOAD_DIR / unique_filename
+        with open(file_path, "wb") as f:
+            f.write(content)
+        return {"filename": unique_filename, "url": f"/uploads/{unique_filename}", "content_type": file.content_type, "size": len(content)}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.post("/api/v1/upload/generation")
 async def upload_generation(file: UploadFile = File(...)):
     
