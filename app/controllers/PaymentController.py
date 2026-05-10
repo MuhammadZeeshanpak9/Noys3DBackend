@@ -37,17 +37,23 @@ def _get_current_user(request: Request) -> Optional[dict]:
 
 
 async def subscribe_to_plan(request: Request):
-    
     try:
         current_user = _get_current_user(request)
         if not current_user:
             return JSONResponse({"error": "Authentication required"}, status_code=401)
-        
         body = await request.json()
-        plan_id = body.get("plan_id")
+        return await _subscribe_to_plan_with_body(request, current_user, body)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def _subscribe_to_plan_with_body(request: Request, current_user: dict, body: dict):
+
+    try:
+        plan_id = body.get("plan_id") or body.get("item_id")
         success_url = body.get("success_url", "https://noys-3d-print.vercel.app/payment?status=success")
         cancel_url = body.get("cancel_url", "https://noys-3d-print.vercel.app/payment?status=cancelled")
-        
+
         if not plan_id:
             return JSONResponse({"error": "Plan ID is required"}, status_code=400)
 
@@ -118,17 +124,23 @@ async def subscribe_to_plan(request: Request):
 
 
 async def buy_credits(request: Request):
-    
     try:
         current_user = _get_current_user(request)
         if not current_user:
             return JSONResponse({"error": "Authentication required"}, status_code=401)
-        
         body = await request.json()
-        credit_pack_id = body.get("credit_pack_id")
+        return await _buy_credits_with_body(request, current_user, body)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def _buy_credits_with_body(request: Request, current_user: dict, body: dict):
+
+    try:
+        credit_pack_id = body.get("credit_pack_id") or body.get("item_id")
         success_url = body.get("success_url", "https://noys-3d-print.vercel.app/payment?status=success")
         cancel_url = body.get("cancel_url", "https://noys-3d-print.vercel.app/payment?status=cancelled")
-        
+
         if not credit_pack_id:
             return JSONResponse({"error": "Credit pack ID is required"}, status_code=400)
 
@@ -199,25 +211,32 @@ async def buy_credits(request: Request):
 
 
 async def create_checkout_session(request: Request):
-    
+
     try:
         current_user = _get_current_user(request)
         if not current_user:
             return JSONResponse({"error": "Authentication required"}, status_code=401)
-        
+
         body = await request.json()
-        item_type = body.get("type")
-        item_id = body.get("item_id")
-        success_url = body.get("success_url", "https://noys-3d-print.vercel.app/payment?status=success")
-        cancel_url = body.get("cancel_url", "https://noys-3d-print.vercel.app/payment?status=cancelled")
-        
-        if item_type == "plan":
-            return await subscribe_to_plan(request)
-        elif item_type == "credit_pack":
-            return await buy_credits(request)
+        # Normalize the type name — the frontend pricing page sends
+        # "subscription"/"credits" but our helpers were written to expect
+        # "plan"/"credit_pack". Accept both.
+        raw_type = (body.get("type") or "").lower()
+        item_id = body.get("item_id") or body.get("plan_id") or body.get("credit_pack_id")
+
+        if raw_type in ("plan", "subscription", "subscriptions"):
+            # Inject plan_id so subscribe_to_plan finds it regardless of field name used.
+            body["plan_id"] = item_id
+            return await _subscribe_to_plan_with_body(request, current_user, body)
+        elif raw_type in ("credit_pack", "credits", "credit", "credit_packs"):
+            body["credit_pack_id"] = item_id
+            return await _buy_credits_with_body(request, current_user, body)
         else:
-            return JSONResponse({"error": "Invalid item type"}, status_code=400)
-            
+            return JSONResponse(
+                {"error": f"Unknown payment type '{raw_type}'. Expected 'subscription' or 'credits'."},
+                status_code=400,
+            )
+
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
