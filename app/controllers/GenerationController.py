@@ -103,15 +103,21 @@ async def _poll_and_update(generation_id: str, task_id: str, api_key: str):
                 if status == "success":
                     output = data.get("output", {})
                     logger.info(f"Tripo output keys for {generation_id}: {list(output.keys())}")
-                    # Try all known preview image field names across Tripo API versions
+                    # 2D preview image — base_model is a GLB, NOT an image, so don't list it here.
                     rendered_image = (
                         output.get("rendered_image") or
                         output.get("generated_image") or
-                        output.get("base_model") or
                         output.get("model_thumbnail") or
                         output.get("thumbnail")
                     )
-                    model_url = output.get("model") or output.get("pbr_model") or output.get("glb_model")
+                    # 3D model URL. With texture: false, Tripo returns the GLB under
+                    # `base_model` instead of `pbr_model`, so it MUST be in this list.
+                    model_url = (
+                        output.get("model") or
+                        output.get("base_model") or
+                        output.get("pbr_model") or
+                        output.get("glb_model")
+                    )
                     # If Tripo gave us a model but no preview, use the model URL as image_url
                     # so the frontend knows generation succeeded (non-empty = done)
                     final_image_url = rendered_image or model_url or ""
@@ -272,14 +278,20 @@ async def get_generation(request: Request, generation_id: str):
                     if status == "success":
                         output = data.get("output", {})
                         logger.info(f"On-demand Tripo output keys for {generation_id}: {list(output.keys())}")
+                        # 2D preview image — base_model is a GLB, NOT an image.
                         rendered_image = (
                             output.get("rendered_image") or
                             output.get("generated_image") or
-                            output.get("base_model") or
                             output.get("model_thumbnail") or
                             output.get("thumbnail")
                         )
-                        model_url = output.get("model") or output.get("base_model") or output.get("pbr_model") or output.get("glb_model")
+                        # 3D model URL — base_model is what Tripo returns when texture: false.
+                        model_url = (
+                            output.get("model") or
+                            output.get("base_model") or
+                            output.get("pbr_model") or
+                            output.get("glb_model")
+                        )
                         final_image_url = rendered_image or model_url or ""
                         supabase.table("generations").update({
                             "image_url": final_image_url,
