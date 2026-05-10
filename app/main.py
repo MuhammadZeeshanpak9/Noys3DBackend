@@ -282,6 +282,11 @@ async def stripe_webhook(request: Request):
     return await PaymentController.stripe_webhook(request)
 
 
+@app.post("/api/v1/payments/verify-session")
+async def verify_session(request: Request):
+    return await PaymentController.verify_session(request)
+
+
 @app.post("/api/v1/generations/generate")
 async def generate_model(request: Request, background_tasks: BackgroundTasks):
     return await GenerationController.generate_model(request, background_tasks)

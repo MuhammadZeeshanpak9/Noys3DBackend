@@ -258,15 +258,105 @@ async def list_payments(request: Request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+def _fulfil_completed_session(session: dict) -> dict:
+    """Apply the post-payment business logic for a paid Stripe Checkout
+    Session. Idempotent — uses the payments table's status as a lock so
+    re-running on the same session_id never double-grants credits.
+
+    Returns a small dict describing what was applied, for the verify
+    endpoint to relay back to the frontend.
+    """
+    session_id = session.get("id")
+    metadata = session.get("metadata") or {}
+    user_id = metadata.get("user_id")
+    payment_type = metadata.get("type")
+
+    # Idempotency: if the payment row is already marked completed, do nothing.
+    existing = (
+        supabase.table("payments")
+        .select("status")
+        .eq("stripe_payment_intent_id", session_id)
+        .execute()
+    )
+    already_done = bool(existing.data) and existing.data[0].get("status") == "completed"
+    if already_done:
+        return {"already_processed": True, "type": payment_type}
+
+    if not user_id:
+        return {"applied": False, "reason": "no user_id in metadata"}
+
+    if payment_type == "subscription":
+        plan_id = metadata.get("plan_id")
+        plan_resp = supabase.table("plans").select("*").eq("id", plan_id).execute()
+        if plan_resp.data:
+            plan = plan_resp.data[0]
+            user_resp = supabase.table("users").select("credits").eq("id", user_id).execute()
+            current_credits = user_resp.data[0].get("credits", 0) if user_resp.data else 0
+            supabase.table("users").update({
+                "subscription_plan": plan["name"].lower().replace(" ", "_"),
+                "credits": current_credits + plan.get("credits", 0),
+                "updated_at": datetime.utcnow().isoformat(),
+            }).eq("id", user_id).execute()
+
+    elif payment_type == "credit_pack":
+        credits = metadata.get("credits", 0)
+        if credits:
+            user_resp = supabase.table("users").select("credits").eq("id", user_id).execute()
+            if user_resp.data:
+                current_credits = user_resp.data[0].get("credits", 0)
+                supabase.table("users").update({
+                    "credits": current_credits + int(credits),
+                    "updated_at": datetime.utcnow().isoformat(),
+                }).eq("id", user_id).execute()
+
+    elif payment_type == "custom_order":
+        order_id = metadata.get("order_id")
+        if order_id:
+            order_resp = supabase.table("custom_orders").update({
+                "status": "new_order",
+                "updated_at": datetime.utcnow().isoformat(),
+            }).eq("id", order_id).eq("status", "awaiting_payment").execute()
+
+            if order_resp.data:
+                order_data = order_resp.data[0]
+                user_resp = supabase.table("users").select("email").eq("id", user_id).execute()
+                if user_resp.data:
+                    try:
+                        from app.utils.email import send_order_confirmation, send_admin_new_order
+                        import asyncio
+                        cust_email = user_resp.data[0]["email"]
+                        asyncio.create_task(send_order_confirmation(
+                            cust_email, order_id,
+                            float(order_data.get("total", 0)),
+                            int(order_data.get("size_mm", 0)),
+                            order_data.get("finish_name", ""),
+                        ))
+                        asyncio.create_task(send_admin_new_order(
+                            order_id, cust_email,
+                            float(order_data.get("total", 0)),
+                            int(order_data.get("size_mm", 0)),
+                            order_data.get("finish_name", ""),
+                        ))
+                    except Exception:
+                        pass
+
+    # Mark the payment row as completed last — protects the idempotency check.
+    supabase.table("payments").update({
+        "status": "completed",
+        "updated_at": datetime.utcnow().isoformat(),
+    }).eq("stripe_payment_intent_id", session_id).execute()
+
+    return {"applied": True, "type": payment_type}
+
+
 async def stripe_webhook(request: Request):
-    
     try:
         if not settings.stripe_secret_key or not settings.stripe_webhook_secret:
             return JSONResponse({"error": "Stripe not configured"}, status_code=503)
 
         payload = await request.body()
         sig_header = request.headers.get("stripe-signature")
-        
+
         try:
             event = stripe_lib.Webhook.construct_event(
                 payload, sig_header, settings.stripe_webhook_secret.strip()
@@ -275,73 +365,55 @@ async def stripe_webhook(request: Request):
             return JSONResponse({"error": "Invalid payload"}, status_code=400)
         except stripe_lib.error.SignatureVerificationError:
             return JSONResponse({"error": "Invalid signature"}, status_code=400)
-        
+
         if event["type"] == "checkout.session.completed":
-            session = event["data"]["object"]
-            user_id = session.get("metadata", {}).get("user_id")
-            payment_type = session.get("metadata", {}).get("type")
-            
-            if user_id:
-                if payment_type == "subscription":
-                    plan_id = session.get("metadata", {}).get("plan_id")
-                    plan_response = supabase.table("plans").select("*").eq("id", plan_id).execute()
-                    if plan_response.data:
-                        plan = plan_response.data[0]
-                        supabase.table("users").update({
-                            "subscription_plan": plan["name"].lower().replace(" ", "_"),
-                            "credits": supabase.table("users").select("credits").eq("id", user_id).execute().data[0].get("credits", 0) + plan.get("credits", 0),
-                            "updated_at": datetime.utcnow().isoformat()
-                        }).eq("id", user_id).execute()
-                
-                elif payment_type == "credit_pack":
-                    pack_id = session.get("metadata", {}).get("pack_id")
-                    credits = session.get("metadata", {}).get("credits", 0)
-                    if pack_id and credits:
-                        user_response = supabase.table("users").select("credits").eq("id", user_id).execute()
-                        if user_response.data:
-                            current_credits = user_response.data[0].get("credits", 0)
-                            supabase.table("users").update({
-                                "credits": current_credits + int(credits),
-                                "updated_at": datetime.utcnow().isoformat()
-                            }).eq("id", user_id).execute()
+            _fulfil_completed_session(event["data"]["object"])
 
-                elif payment_type == "custom_order":
-                    order_id = session.get("metadata", {}).get("order_id")
-                    if order_id:
-                        order_resp = supabase.table("custom_orders").update({
-                            "status": "new_order",
-                            "updated_at": datetime.utcnow().isoformat(),
-                        }).eq("id", order_id).eq("status", "awaiting_payment").execute()
-
-                        # Send confirmation emails
-                        if order_resp.data:
-                            order_data = order_resp.data[0]
-                            user_resp = supabase.table("users").select("email").eq("id", user_id).execute()
-                            if user_resp.data:
-                                try:
-                                    from app.utils.email import send_order_confirmation, send_admin_new_order
-                                    import asyncio
-                                    cust_email = user_resp.data[0]["email"]
-                                    asyncio.create_task(send_order_confirmation(
-                                        cust_email, order_id,
-                                        float(order_data.get("total", 0)),
-                                        int(order_data.get("size_mm", 0)),
-                                        order_data.get("finish_name", ""),
-                                    ))
-                                    asyncio.create_task(send_admin_new_order(
-                                        order_id, cust_email,
-                                        float(order_data.get("total", 0)),
-                                        int(order_data.get("size_mm", 0)),
-                                        order_data.get("finish_name", ""),
-                                    ))
-                                except Exception:
-                                    pass
-
-                supabase.table("payments").update({
-                    "status": "completed"
-                }).eq("stripe_payment_intent_id", session["id"]).execute()
-        
         return {"status": "success"}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def verify_session(request: Request):
+    """Webhook-independent fallback. The frontend calls this when the user
+    lands on /payment?status=success&session_id=... — we ask Stripe directly
+    whether the session was paid and, if so, apply the same fulfillment logic
+    the webhook would. Idempotent, safe to call multiple times."""
+    try:
+        current_user = _get_current_user(request)
+        if not current_user:
+            return JSONResponse({"error": "Authentication required"}, status_code=401)
+
+        if not settings.stripe_secret_key:
+            return JSONResponse({"error": "Stripe not configured"}, status_code=503)
+
+        body = await request.json()
+        session_id = body.get("session_id")
+        if not session_id:
+            return JSONResponse({"error": "session_id is required"}, status_code=400)
+
+        try:
+            session = stripe_lib.checkout.Session.retrieve(session_id)
+        except Exception as stripe_err:
+            return JSONResponse({"error": f"Stripe lookup failed: {stripe_err}"}, status_code=502)
+
+        # Refuse to fulfil if the session isn't actually paid. For subscription
+        # mode Stripe sets payment_status to "paid" on first invoice success.
+        paid = session.get("payment_status") == "paid" or session.get("status") == "complete"
+        if not paid:
+            return JSONResponse(
+                {"error": "Payment not completed", "payment_status": session.get("payment_status")},
+                status_code=400,
+            )
+
+        # Defend against someone else's session being submitted: the metadata
+        # user_id must match the caller's user id.
+        meta_user_id = (session.get("metadata") or {}).get("user_id")
+        if meta_user_id and meta_user_id != current_user["id"]:
+            return JSONResponse({"error": "Session does not belong to this user"}, status_code=403)
+
+        result = _fulfil_completed_session(session)
+        return {"status": "ok", **result}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
