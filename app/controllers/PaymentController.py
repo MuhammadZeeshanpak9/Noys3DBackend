@@ -13,7 +13,9 @@ supabase = get_supabase_client()
 settings = get_settings()
 
 if settings.stripe_secret_key:
-    stripe_lib.api_key = settings.stripe_secret_key
+    # .strip() guards against trailing newlines / whitespace that sneak in
+    # when pasting the key into a hosting dashboard's env var input.
+    stripe_lib.api_key = settings.stripe_secret_key.strip()
 
 
 def _get_current_user(request: Request) -> Optional[dict]:
@@ -267,7 +269,7 @@ async def stripe_webhook(request: Request):
         
         try:
             event = stripe_lib.Webhook.construct_event(
-                payload, sig_header, settings.stripe_webhook_secret
+                payload, sig_header, settings.stripe_webhook_secret.strip()
             )
         except ValueError:
             return JSONResponse({"error": "Invalid payload"}, status_code=400)

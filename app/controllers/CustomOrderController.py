@@ -18,7 +18,9 @@ supabase = get_supabase_client()
 settings = get_settings()
 
 if settings.stripe_secret_key:
-    stripe_lib.api_key = settings.stripe_secret_key
+    # .strip() — same defensive guard as PaymentController; trailing
+    # newlines from hosting dashboards corrupt the Authorization header.
+    stripe_lib.api_key = settings.stripe_secret_key.strip()
 
 VALID_STATUSES = ["new_order", "awaiting_payment", "in_review", "printing", "kit_packing", "painting", "completed", "shipped", "cancelled"]
 VALID_REVIEW = ["pending", "approved", "changes_requested", "rejected"]
