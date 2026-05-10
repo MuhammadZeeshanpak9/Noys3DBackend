@@ -60,37 +60,37 @@ async def _subscribe_to_plan_with_body(request: Request, current_user: dict, bod
         plan_response = supabase.table("plans").select("*").eq("id", plan_id).execute()
         if not plan_response.data:
             return JSONResponse({"error": "Plan not found"}, status_code=404)
-        
+
         plan = plan_response.data[0]
 
-        if not settings.stripe_secret_key or not plan.get("stripe_price_id"):
-            payment = {
-                "id": str(uuid4()),
-                "user_id": current_user["id"],
-                "type": "subscription",
-                "amount": plan["price"],
-                "status": "completed",
-                "metadata": json.dumps({"plan_id": plan_id, "plan_name": plan["name"]}),
-                "created_at": datetime.utcnow().isoformat(),
-                "updated_at": datetime.utcnow().isoformat()
-            }
+        # Hard requirement: Stripe must be configured. We never grant a paid
+        # subscription without a real Stripe Checkout flow.
+        if not settings.stripe_secret_key:
+            return JSONResponse(
+                {"error": "Payments are not configured on this server. Please contact support."},
+                status_code=503,
+            )
 
-            supabase.table("users").update({
-                "subscription_plan": plan["name"].lower().replace(" ", "_"),
-                "credits": current_user.get("credits", 0) + plan.get("credits", 0),
-                "updated_at": datetime.utcnow().isoformat()
-            }).eq("id", current_user["id"]).execute()
-            
-            supabase.table("payments").insert(payment).execute()
-            return {"status": "completed", "message": "Subscription activated"}
-        
         try:
+            # Build a Stripe line item from our plan record. Using price_data
+            # avoids the need for an admin-maintained Stripe Price ID on every
+            # plan — Stripe creates the underlying product/price on demand.
+            if plan.get("stripe_price_id"):
+                line_items = [{"price": plan["stripe_price_id"], "quantity": 1}]
+            else:
+                line_items = [{
+                    "price_data": {
+                        "currency": "gbp",
+                        "product_data": {"name": plan["name"]},
+                        "unit_amount": int(round(float(plan["price"]) * 100)),
+                        "recurring": {"interval": "month"},
+                    },
+                    "quantity": 1,
+                }]
+
             checkout_session = stripe_lib.checkout.Session.create(
                 payment_method_types=["card"],
-                line_items=[{
-                    "price": plan["stripe_price_id"],
-                    "quantity": 1,
-                }],
+                line_items=line_items,
                 mode="subscription",
                 success_url=success_url + "?session_id={CHECKOUT_SESSION_ID}",
                 cancel_url=cancel_url,
@@ -147,36 +147,34 @@ async def _buy_credits_with_body(request: Request, current_user: dict, body: dic
         pack_response = supabase.table("credit_packs").select("*").eq("id", credit_pack_id).execute()
         if not pack_response.data:
             return JSONResponse({"error": "Credit pack not found"}, status_code=404)
-        
+
         pack = pack_response.data[0]
 
-        if not settings.stripe_secret_key or not pack.get("stripe_price_id"):
-            payment = {
-                "id": str(uuid4()),
-                "user_id": current_user["id"],
-                "type": "credit_pack",
-                "amount": pack["price"],
-                "status": "completed",
-                "metadata": json.dumps({"pack_id": credit_pack_id, "credits": pack["credits"]}),
-                "created_at": datetime.utcnow().isoformat(),
-                "updated_at": datetime.utcnow().isoformat()
-            }
+        # Hard requirement: Stripe must be configured. We never grant credits
+        # without a real Stripe Checkout flow — otherwise anyone could click
+        # "Buy" and get free credits.
+        if not settings.stripe_secret_key:
+            return JSONResponse(
+                {"error": "Payments are not configured on this server. Please contact support."},
+                status_code=503,
+            )
 
-            supabase.table("users").update({
-                "credits": current_user.get("credits", 0) + pack["credits"],
-                "updated_at": datetime.utcnow().isoformat()
-            }).eq("id", current_user["id"]).execute()
-            
-            supabase.table("payments").insert(payment).execute()
-            return {"status": "completed", "message": "Credits purchased"}
-        
         try:
+            if pack.get("stripe_price_id"):
+                line_items = [{"price": pack["stripe_price_id"], "quantity": 1}]
+            else:
+                line_items = [{
+                    "price_data": {
+                        "currency": "gbp",
+                        "product_data": {"name": f"{pack['credits']} AI Credits"},
+                        "unit_amount": int(round(float(pack["price"]) * 100)),
+                    },
+                    "quantity": 1,
+                }]
+
             checkout_session = stripe_lib.checkout.Session.create(
                 payment_method_types=["card"],
-                line_items=[{
-                    "price": pack["stripe_price_id"],
-                    "quantity": 1,
-                }],
+                line_items=line_items,
                 mode="payment",
                 success_url=success_url + "?session_id={CHECKOUT_SESSION_ID}",
                 cancel_url=cancel_url,
