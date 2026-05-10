@@ -302,6 +302,13 @@ async def get_generation(request: Request, generation_id: str):
     return await GenerationController.get_generation(request, generation_id)
 
 
+@app.get("/api/v1/generations/{generation_id}/model")
+async def get_generation_model(generation_id: str):
+    """Same-origin proxy for the GLB so the browser viewer can load it
+    without hitting Tripo CDN CORS restrictions."""
+    return await GenerationController.proxy_model(generation_id)
+
+
 @app.post("/api/v1/generations/{generation_id}/save")
 async def save_generation(request: Request, generation_id: str):
     return await GenerationController.save_generation(request, generation_id)
