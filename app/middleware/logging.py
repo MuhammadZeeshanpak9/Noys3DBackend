@@ -88,15 +88,23 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
 from fastapi import HTTPException
 
 class TimeoutMiddleware(BaseHTTPMiddleware):
-    
-    
+
+
     def __init__(self, app, timeout: float = 30.0):
         super().__init__(app)
         self.timeout = timeout
-    
+
     async def dispatch(self, request: Request, call_next):
         import asyncio
-        
+
+        # Endpoints that legitimately stream large bodies (model proxy, file
+        # uploads) must not be killed at 30s — they can take much longer for
+        # multi-MB binary payloads, and aborting mid-stream produces
+        # ERR_CONNECTION_RESET in the browser.
+        path = request.url.path
+        if path.endswith("/model") or "/upload/" in path:
+            return await call_next(request)
+
         try:
             response = await asyncio.wait_for(
                 call_next(request),

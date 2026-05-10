@@ -364,7 +364,11 @@ async def get_gallery(request: Request):
 async def proxy_model(generation_id: str):
     """Stream the GLB model from Tripo's CDN through our backend so the
     browser sees it as same-origin (Tripo's CDN doesn't send CORS headers,
-    which makes useGLTF in the frontend fail to load it directly)."""
+    which makes useGLTF in the frontend fail to load it directly).
+
+    We use true streaming (not buffer-then-return) so large GLBs (cars,
+    detailed models) don't exhaust memory and don't take so long to first
+    byte that an upstream timeout middleware kills the connection."""
     try:
         # Look up the generation to get the upstream URL.
         row = supabase.table("generations").select("stl_url").eq("id", generation_id).execute()
@@ -375,32 +379,46 @@ async def proxy_model(generation_id: str):
         if not upstream_url:
             return JSONResponse({"error": "No 3D model available for this generation"}, status_code=404)
 
-        # Fetch upstream and stream to client. We fetch the whole body first
-        # because Tripo's CDN sometimes closes the connection partway through
-        # a chunked stream, and a 5-15MB GLB is small enough to buffer.
-        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-            upstream = await client.get(upstream_url)
-            if upstream.status_code != 200:
-                logger.warning(f"Upstream model fetch failed for {generation_id}: HTTP {upstream.status_code}")
-                return JSONResponse(
-                    {"error": f"Upstream returned HTTP {upstream.status_code}"},
-                    status_code=502,
-                )
+        # Open a long-lived client and stream. The client closes inside the
+        # generator after the last chunk is yielded.
+        client = httpx.AsyncClient(timeout=httpx.Timeout(connect=15.0, read=120.0, write=15.0, pool=15.0), follow_redirects=True)
+        try:
+            req = client.build_request("GET", upstream_url)
+            upstream = await client.send(req, stream=True)
+        except Exception as fetch_err:
+            await client.aclose()
+            logger.error(f"Upstream connect failed for {generation_id}: {fetch_err}")
+            return JSONResponse({"error": "Could not reach upstream model host"}, status_code=502)
 
-            content = upstream.content
-            content_type = upstream.headers.get("content-type", "model/gltf-binary")
+        if upstream.status_code != 200:
+            await upstream.aclose()
+            await client.aclose()
+            logger.warning(f"Upstream model fetch failed for {generation_id}: HTTP {upstream.status_code}")
+            return JSONResponse(
+                {"error": f"Upstream returned HTTP {upstream.status_code}"},
+                status_code=502,
+            )
 
-        return Response(
-            content=content,
-            media_type=content_type,
-            headers={
-                # Long cache: GLB content for a generation never changes.
-                "Cache-Control": "public, max-age=31536000, immutable",
-                # Be explicit about CORS in case the browser is strict.
-                "Access-Control-Allow-Origin": "*",
-                "Cross-Origin-Resource-Policy": "cross-origin",
-            },
-        )
+        content_type = upstream.headers.get("content-type", "model/gltf-binary")
+        content_length = upstream.headers.get("content-length")
+
+        async def gen():
+            try:
+                async for chunk in upstream.aiter_bytes(chunk_size=64 * 1024):
+                    yield chunk
+            finally:
+                await upstream.aclose()
+                await client.aclose()
+
+        headers = {
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "Access-Control-Allow-Origin": "*",
+            "Cross-Origin-Resource-Policy": "cross-origin",
+        }
+        if content_length:
+            headers["Content-Length"] = content_length
+
+        return StreamingResponse(gen(), media_type=content_type, headers=headers)
     except httpx.TimeoutException:
         logger.error(f"Timeout fetching model for {generation_id}")
         return JSONResponse({"error": "Upstream timed out"}, status_code=504)
