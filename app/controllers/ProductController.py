@@ -147,6 +147,49 @@ async def delete_category(request: Request, category_id: str):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+def _fetch_colours_for_products(product_ids: list) -> dict:
+    """Return {product_id: [colour_row, ...]} ordered by sort_order."""
+    if not product_ids:
+        return {}
+    rows = (
+        supabase.table("product_colours")
+        .select("*")
+        .in_("product_id", product_ids)
+        .order("sort_order")
+        .execute()
+        .data
+        or []
+    )
+    by_pid: dict = {}
+    for r in rows:
+        by_pid.setdefault(r["product_id"], []).append(r)
+    return by_pid
+
+
+def _replace_product_colours(product_id: str, colours: list) -> None:
+    """Wipe existing colour rows for this product and insert the new list.
+    `colours` is a list of {name, hex_code, sort_order?} dicts."""
+    supabase.table("product_colours").delete().eq("product_id", product_id).execute()
+    if not colours:
+        return
+    rows = []
+    for idx, c in enumerate(colours):
+        name = (c or {}).get("name", "").strip()
+        hex_code = (c or {}).get("hex_code", "").strip()
+        if not name or not hex_code:
+            continue
+        rows.append({
+            "id": str(uuid4()),
+            "product_id": product_id,
+            "name": name,
+            "hex_code": hex_code,
+            "sort_order": int((c or {}).get("sort_order", idx)),
+            "created_at": datetime.utcnow().isoformat(),
+        })
+    if rows:
+        supabase.table("product_colours").insert(rows).execute()
+
+
 def _fetch_media_for_products(product_ids: list) -> dict:
     """Return {product_id: [media_row, ...]} ordered by sort_order."""
     if not product_ids:
@@ -205,9 +248,12 @@ async def list_products(category: Optional[str] = None, active_only: bool = True
 
         response = query.order("created_at", desc=True).execute()
         products = response.data or []
-        media_by_pid = _fetch_media_for_products([p["id"] for p in products])
+        pids = [p["id"] for p in products]
+        media_by_pid = _fetch_media_for_products(pids)
+        colours_by_pid = _fetch_colours_for_products(pids)
         for p in products:
             p["media"] = media_by_pid.get(p["id"], [])
+            p["colours"] = colours_by_pid.get(p["id"], [])
         return products
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -221,6 +267,7 @@ async def get_product(product_id: str):
             return JSONResponse({"error": "Product not found"}, status_code=404)
         product = response.data[0]
         product["media"] = _fetch_media_for_products([product_id]).get(product_id, [])
+        product["colours"] = _fetch_colours_for_products([product_id]).get(product_id, [])
         return product
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -251,6 +298,7 @@ async def create_product(request: Request):
             body.pop("status", None)
 
         media = body.pop("media", None)
+        colours = body.pop("colours", None)
 
         # Derive thumbnail (image_url) from the first image in media[] if not provided.
         image_url = body.get("image_url")
@@ -282,7 +330,11 @@ async def create_product(request: Request):
         if isinstance(media, list):
             _replace_product_media(product_id, media)
 
+        if isinstance(colours, list):
+            _replace_product_colours(product_id, colours)
+
         created["media"] = _fetch_media_for_products([product_id]).get(product_id, [])
+        created["colours"] = _fetch_colours_for_products([product_id]).get(product_id, [])
         return created
     except Exception as e:
         import logging
@@ -309,6 +361,7 @@ async def update_product(request: Request, product_id: str):
             body.pop("status", None)
 
         media = body.pop("media", None)
+        colours = body.pop("colours", None)
 
         # If client sent media[] but no explicit image_url, sync the thumbnail
         # to the first image so shop cards stay accurate.
@@ -333,8 +386,12 @@ async def update_product(request: Request, product_id: str):
         if isinstance(media, list):
             _replace_product_media(product_id, media)
 
+        if isinstance(colours, list):
+            _replace_product_colours(product_id, colours)
+
         result = response.data[0]
         result["media"] = _fetch_media_for_products([product_id]).get(product_id, [])
+        result["colours"] = _fetch_colours_for_products([product_id]).get(product_id, [])
         return result
     except Exception as e:
         import logging

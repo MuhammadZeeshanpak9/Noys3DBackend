@@ -74,7 +74,7 @@ class Category(Base):
 
 class Product(Base):
     __tablename__ = "products"
-    
+
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False)
     description = Column(Text)
@@ -84,9 +84,23 @@ class Product(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     category = relationship("Category", back_populates="products")
     order_items = relationship("OrderItem", back_populates="product")
+    colours = relationship("ProductColour", back_populates="product", order_by="ProductColour.sort_order")
+
+
+class ProductColour(Base):
+    __tablename__ = "product_colours"
+
+    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    product_id = Column(UUID(as_uuid=True), ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    name       = Column(String(100), nullable=False)
+    hex_code   = Column(String(7), nullable=False)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    product = relationship("Product", back_populates="colours")
 
 
 class Plan(Base):
