@@ -61,11 +61,15 @@ async def _submit_tripo_task(api_key: str, prompt: str = "", file_token: str = N
     """Submit a generation task to Tripo, returns task_id or None on failure."""
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
-    # Style suffix appended to all text prompts for consistent, print-ready geometry
+    # Style suffix appended to all text prompts — optimised for realism and detail
     STYLE_SUFFIX = (
-        ", solid 3D printable object, clean mesh topology, watertight geometry, "
-        "no loose parts, high polygon detail, smooth surfaces, "
-        "neutral grey surface, no color, no texture, plain white studio background"
+        ", highly detailed and realistic, fine surface detail, natural anatomy and proportions, "
+        "smooth organic forms, no faceted or low-poly appearance, high geometry fidelity, "
+        "neutral mid-grey material, no color, no texture, "
+        "plain pure white background, no shadows, even soft studio lighting across entire object, "
+        "no dramatic lighting, no environmental scenery, no props, "
+        "single object centered in frame, full object clearly visible, strong silhouette definition, "
+        "high resolution, optimised for image-to-3D conversion"
     )
 
     if file_token:
