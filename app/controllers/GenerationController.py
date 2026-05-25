@@ -383,7 +383,7 @@ async def get_gallery(request: Request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-async def proxy_model(generation_id: str):
+async def proxy_model(request: Request, generation_id: str):
     """Stream the GLB model from Tripo's CDN through our backend so the
     browser sees it as same-origin (Tripo's CDN doesn't send CORS headers,
     which makes useGLTF in the frontend fail to load it directly).
@@ -392,12 +392,20 @@ async def proxy_model(generation_id: str):
     detailed models) don't exhaust memory and don't take so long to first
     byte that an upstream timeout middleware kills the connection."""
     try:
-        # Look up the generation to get the upstream URL.
-        row = supabase.table("generations").select("stl_url").eq("id", generation_id).execute()
+        current_user = _get_current_user(request)
+        if not current_user:
+            return JSONResponse({"error": "Authentication required"}, status_code=401)
+
+        # Look up the generation and verify ownership.
+        row = supabase.table("generations").select("stl_url, user_id").eq("id", generation_id).execute()
         if not row.data:
             return JSONResponse({"error": "Generation not found"}, status_code=404)
 
-        upstream_url = row.data[0].get("stl_url")
+        gen_row = row.data[0]
+        if gen_row.get("user_id") != current_user["id"] and current_user.get("role") != "admin":
+            return JSONResponse({"error": "Access denied"}, status_code=403)
+
+        upstream_url = gen_row.get("stl_url")
         if not upstream_url:
             return JSONResponse({"error": "No 3D model available for this generation"}, status_code=404)
 

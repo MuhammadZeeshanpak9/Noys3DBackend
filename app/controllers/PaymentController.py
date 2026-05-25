@@ -409,7 +409,7 @@ async def verify_session(request: Request):
         # Defend against someone else's session being submitted: the metadata
         # user_id must match the caller's user id.
         meta_user_id = (session.get("metadata") or {}).get("user_id")
-        if meta_user_id and meta_user_id != current_user["id"]:
+        if not meta_user_id or meta_user_id != current_user["id"]:
             return JSONResponse({"error": "Session does not belong to this user"}, status_code=403)
 
         result = _fulfil_completed_session(session)
@@ -426,7 +426,7 @@ async def get_stripe_config(request: Request):
         
         return {
             "configured": True,
-            "publishable_key": settings.stripe_secret_key.replace("sk_", "pk_") if settings.stripe_secret_key else None
+            "publishable_key": settings.stripe_publishable_key or None,
         }
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

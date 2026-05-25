@@ -34,7 +34,12 @@ app.add_middleware(RequestLoggingMiddleware)  # Request logging
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        settings.frontend_url,
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -308,10 +313,10 @@ async def get_generation(request: Request, generation_id: str):
 
 
 @app.get("/api/v1/generations/{generation_id}/model")
-async def get_generation_model(generation_id: str):
+async def get_generation_model(request: Request, generation_id: str):
     """Same-origin proxy for the GLB so the browser viewer can load it
     without hitting Tripo CDN CORS restrictions."""
-    return await GenerationController.proxy_model(generation_id)
+    return await GenerationController.proxy_model(request, generation_id)
 
 
 @app.post("/api/v1/generations/{generation_id}/save")

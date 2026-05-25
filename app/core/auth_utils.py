@@ -19,7 +19,9 @@ def get_current_user(request: Request) -> Optional[dict]:
     if not auth_header or not auth_header.startswith("Bearer "):
         return None
 
-    token = auth_header.split(" ")[1]
+    token = auth_header.split(" ", 1)[1]
+    if not token:
+        return None
     payload = decode_access_token(token)
     if not payload:
         return None

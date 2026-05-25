@@ -44,7 +44,18 @@ async def create_order(request: Request):
         if not items or not shipping_address:
             return JSONResponse({"error": "Items and shipping address are required"}, status_code=400)
 
-        total = sum(item.get("price", 0) * item.get("quantity", 1) for item in items)
+        # Validate prices server-side — never trust client-provided prices.
+        total = 0.0
+        for item in items:
+            product_id = item.get("id") or item.get("product_id")
+            qty = max(1, int(item.get("quantity", 1)))
+            if product_id:
+                prod_resp = supabase.table("products").select("price").eq("id", product_id).execute()
+                if not prod_resp.data:
+                    return JSONResponse({"error": f"Product not found: {product_id}"}, status_code=400)
+                total += float(prod_resp.data[0]["price"]) * qty
+            else:
+                total += float(item.get("price", 0)) * qty
         
         order = {
             "id": str(uuid4()),
@@ -60,7 +71,9 @@ async def create_order(request: Request):
         response = supabase.table("orders").insert(order).execute()
         return response.data[0]
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        import logging
+        logging.error(f"create_order error: {e}")
+        return JSONResponse({"error": "Failed to create order"}, status_code=500)
 
 
 async def list_orders(request: Request):
@@ -73,7 +86,9 @@ async def list_orders(request: Request):
         response = supabase.table("orders").select("*").eq("user_id", current_user["id"]).order("created_at", desc=True).execute()
         return response.data
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        import logging
+        logging.error(f"list_orders error: {e}")
+        return JSONResponse({"error": "Failed to list orders"}, status_code=500)
 
 
 async def get_order(request: Request, order_id: str):
@@ -95,7 +110,9 @@ async def get_order(request: Request, order_id: str):
         
         return response.data[0]
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        import logging
+        logging.error(f"get_order error: {e}")
+        return JSONResponse({"error": "Failed to get order"}, status_code=500)
 
 
 async def update_order_status(request: Request, order_id: str):
@@ -127,4 +144,6 @@ async def update_order_status(request: Request, order_id: str):
         
         return {"message": f"Order status updated to {status}"}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        import logging
+        logging.error(f"update_order_status error: {e}")
+        return JSONResponse({"error": "Failed to update order status"}, status_code=500)

@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 10080
 
     stripe_secret_key: str = ""
+    stripe_publishable_key: str = ""
     stripe_webhook_secret: str = ""
 
     tripo_api_key: str = ""
