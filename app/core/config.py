@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     resend_api_key: str = ""
     admin_email: str = "orders@noys3dprints.co.uk"
-    frontend_url: str = "https://noys-3d-print.vercel.app"
+    frontend_url: str = "https://www.noys3dprints.co.uk"
 
     api_v1_prefix: str = "/api/v1"
     cors_origins: list[str] = ["*"]

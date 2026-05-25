@@ -35,7 +35,9 @@ app.add_middleware(RequestLoggingMiddleware)  # Request logging
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        settings.frontend_url,
+        "https://www.noys3dprints.co.uk",
+        "https://noys3dprints.co.uk",
+        "https://noys-3-d-prints.vercel.app",
         "http://localhost:3000",
         "http://localhost:3001",
         "http://127.0.0.1:3000",
