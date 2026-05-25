@@ -61,15 +61,25 @@ async def _submit_tripo_task(api_key: str, prompt: str = "", file_token: str = N
     """Submit a generation task to Tripo, returns task_id or None on failure."""
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
-    # Style suffix appended to all text prompts — optimised for realism and detail
+    # Appended to text prompts — forces #808080 grey, matte, high detail
     STYLE_SUFFIX = (
         ", highly detailed and realistic, fine surface detail, natural anatomy and proportions, "
         "smooth organic forms, no faceted or low-poly appearance, high geometry fidelity, "
-        "neutral mid-grey material, no color, no texture, "
-        "plain pure white background, no shadows, even soft studio lighting across entire object, "
+        "uniform #808080 medium grey matte surface, matte finish, no gloss, no specularity, no shine, no reflections, "
+        "no color variation, no color, no texture, "
+        "plain pure white background, no shadows, even soft diffuse studio lighting across entire object, "
         "no dramatic lighting, no environmental scenery, no props, "
         "single object centered in frame, full object clearly visible, strong silhouette definition, "
         "high resolution, optimised for image-to-3D conversion"
+    )
+
+    # Applied to image-to-model tasks — overrides input image colours with grey matte
+    IMAGE_STYLE_SUFFIX = (
+        "Reconstruct as a highly detailed 3D model. "
+        "Apply uniform #808080 medium grey matte surface to entire model, "
+        "matte finish, no gloss, no specularity, no shine, no reflections, "
+        "ignore all original colours from the reference image, grey only. "
+        "Plain pure white background, even soft diffuse studio lighting, no shadows."
     )
 
     if file_token:
@@ -78,6 +88,7 @@ async def _submit_tripo_task(api_key: str, prompt: str = "", file_token: str = N
             "type": "image_to_model",
             "model_version": "v2.5-20250123",
             "file": {"type": tripo_type, "file_token": file_token},
+            "prompt": IMAGE_STYLE_SUFFIX,
             "texture": False,
         }
     else:
