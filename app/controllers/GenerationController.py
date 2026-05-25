@@ -61,16 +61,17 @@ async def _submit_tripo_task(api_key: str, prompt: str = "", file_token: str = N
     """Submit a generation task to Tripo, returns task_id or None on failure."""
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
-    # Appended to text prompts — forces #808080 grey, matte, high detail
+    # Appended to text prompts — forces #808080 grey matte, maximum geometry detail
     STYLE_SUFFIX = (
-        ", highly detailed and realistic, fine surface detail, natural anatomy and proportions, "
-        "smooth organic forms, no faceted or low-poly appearance, high geometry fidelity, "
-        "uniform #808080 medium grey matte surface, matte finish, no gloss, no specularity, no shine, no reflections, "
-        "no color variation, no color, no texture, "
-        "plain pure white background, no shadows, even soft diffuse studio lighting across entire object, "
-        "no dramatic lighting, no environmental scenery, no props, "
-        "single object centered in frame, full object clearly visible, strong silhouette definition, "
-        "high resolution, optimised for image-to-3D conversion"
+        ", highly detailed realistic 3D sculpt, fine surface relief and micro-detail, "
+        "natural anatomy and proportions, sharp edge definition where appropriate, "
+        "smooth organic surfaces, high polygon count, no low-poly or faceted appearance, "
+        "museum quality sculpt, hero asset level of detail, "
+        "uniform solid #808080 medium grey matte clay surface, completely matte finish, "
+        "no gloss, no specularity, no shine, no reflections, no color variation, single flat grey tone, "
+        "pure white seamless background, soft even diffuse lighting, no shadows, no highlights, "
+        "no scenery, no props, no ground plane, single isolated object centered in frame, "
+        "full object clearly visible, strong clean silhouette, professional grey clay maquette style"
     )
 
     # Applied to image-to-model tasks — overrides input image colours with grey matte
