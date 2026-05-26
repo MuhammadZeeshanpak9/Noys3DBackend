@@ -423,7 +423,18 @@ async def proxy_model(request: Request, generation_id: str):
     detailed models) don't exhaust memory and don't take so long to first
     byte that an upstream timeout middleware kills the connection."""
     try:
+        # useGLTF / browser GETs can't send an Authorization header, so we
+        # also accept the JWT via a ?token= query parameter as a fallback.
         current_user = _get_current_user(request)
+        if not current_user:
+            qs_token = request.query_params.get("token")
+            if qs_token:
+                payload = decode_access_token(qs_token)
+                if payload:
+                    user_id = payload.get("sub")
+                    row = supabase.table("users").select("*").eq("id", user_id).execute()
+                    if row.data:
+                        current_user = row.data[0]
         if not current_user:
             return JSONResponse({"error": "Authentication required"}, status_code=401)
 
