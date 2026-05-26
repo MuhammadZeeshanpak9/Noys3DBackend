@@ -22,6 +22,42 @@ _active_tasks: dict = {}
 # Maps generation_id → last known Tripo progress (0-100).
 _task_progress: dict = {}
 
+# Prompt suffixes — short and focused on what Tripo's parser can act on.
+# Grey colour is enforced at the frontend by ModelViewer3DInner.GREY_MATERIAL,
+# so we no longer ask Tripo for grey (that confused its texture-synth pass).
+STYLE_SUFFIX = (
+    ", highly detailed 3D sculpt, sharp edge definition, "
+    "clean topology, fine surface relief, natural proportions, "
+    "hero asset level of detail, single isolated object, strong silhouette"
+)
+
+IMAGE_STYLE_SUFFIX = (
+    "Reconstruct as a highly detailed 3D sculpt with sharp edges, "
+    "clean topology, and fine surface relief. Single isolated object."
+)
+
+# Keywords that signal a person/character subject — when matched, we pass
+# Tripo's `person:person2cartoon` style preset which produces the caricature
+# figurine look in the client's reference images.
+PERSON_KEYWORDS = {
+    "person", "people", "man", "woman", "boy", "girl", "child", "kid",
+    "character", "hero", "figure", "miniature", "human", "lady", "guy",
+    "knight", "soldier", "wizard", "warrior", "king", "queen", "prince",
+    "princess", "elf", "dwarf", "orc", "monk", "ninja", "samurai",
+    "guard", "fairy", "angel", "demon", "father", "mother", "son",
+    "daughter", "doctor", "nurse", "officer", "chef", "pilot",
+    "athlete", "dancer", "worker", "gallerist", "portrait", "bust",
+}
+
+
+def _detect_person_subject(prompt: str, has_image: bool) -> bool:
+    """Person-cartoon style if prompt mentions a person OR (image upload with
+    no prompt — image-to-model is most often a person reference)."""
+    if not prompt:
+        return has_image
+    lower = prompt.lower()
+    return any(kw in lower for kw in PERSON_KEYWORDS)
+
 
 def _get_current_user(request: Request) -> Optional[dict]:
     auth_header = request.headers.get("Authorization")
@@ -61,44 +97,38 @@ async def _submit_tripo_task(api_key: str, prompt: str = "", file_token: str = N
     """Submit a generation task to Tripo, returns task_id or None on failure."""
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
-    # Appended to text prompts — forces #808080 grey matte, maximum geometry detail
-    STYLE_SUFFIX = (
-        ", highly detailed realistic 3D sculpt, fine surface relief and micro-detail, "
-        "natural anatomy and proportions, sharp edge definition where appropriate, "
-        "smooth organic surfaces, high polygon count, no low-poly or faceted appearance, "
-        "museum quality sculpt, hero asset level of detail, "
-        "uniform solid #808080 medium grey matte clay surface, completely matte finish, "
-        "no gloss, no specularity, no shine, no reflections, no color variation, single flat grey tone, "
-        "pure white seamless background, soft even diffuse lighting, no shadows, no highlights, "
-        "no scenery, no props, no ground plane, single isolated object centered in frame, "
-        "full object clearly visible, strong clean silhouette, professional grey clay maquette style"
-    )
+    has_image = bool(file_token)
+    is_person = _detect_person_subject(prompt, has_image)
 
-    # Applied to image-to-model tasks — overrides input image colours with grey matte
-    IMAGE_STYLE_SUFFIX = (
-        "Reconstruct as a highly detailed 3D model. "
-        "Apply uniform #808080 medium grey matte surface to entire model, "
-        "matte finish, no gloss, no specularity, no shine, no reflections, "
-        "ignore all original colours from the reference image, grey only. "
-        "Plain pure white background, even soft diffuse studio lighting, no shadows."
-    )
+    # Quality params shared by both pathways. texture: True triggers Tripo's
+    # PBR refinement pass which sharpens geometry. The frontend GREY_MATERIAL
+    # override (ModelViewer3DInner.tsx) still forces grey display regardless.
+    quality_params = {
+        "texture": True,
+        "texture_quality": "detailed",
+        "face_limit": 30000,
+        "quad": True,
+    }
 
-    if file_token:
+    if has_image:
         tripo_type = "png" if file_ext in ("png",) else "jpeg"
         payload = {
             "type": "image_to_model",
             "model_version": "v2.5-20250123",
             "file": {"type": tripo_type, "file_token": file_token},
             "prompt": IMAGE_STYLE_SUFFIX,
-            "texture": False,
+            **quality_params,
         }
     else:
         payload = {
             "type": "text_to_model",
             "model_version": "v2.5-20250123",
             "prompt": prompt + STYLE_SUFFIX,
-            "texture": False,
+            **quality_params,
         }
+
+    if is_person:
+        payload["style"] = "person:person2cartoon"
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
