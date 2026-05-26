@@ -100,12 +100,13 @@ async def _submit_tripo_task(api_key: str, prompt: str = "", file_token: str = N
     has_image = bool(file_token)
     is_person = _detect_person_subject(prompt, has_image)
 
-    # Quality params shared by both pathways. texture: True triggers Tripo's
-    # PBR refinement pass which sharpens geometry. The frontend GREY_MATERIAL
-    # override (ModelViewer3DInner.tsx) still forces grey display regardless.
+    # Quality params shared by both pathways. We keep texture: False because
+    # PBR-textured GLBs from Tripo can reference external texture files that
+    # the proxy_model endpoint doesn't stream, causing useGLTF to fail load.
+    # Grey display is enforced at view time by the frontend GREY_MATERIAL
+    # override (ModelViewer3DInner.tsx) — no texture needed.
     quality_params = {
-        "texture": True,
-        "texture_quality": "detailed",
+        "texture": False,
         "face_limit": 30000,
         "quad": True,
     }
