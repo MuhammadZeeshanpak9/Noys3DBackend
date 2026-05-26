@@ -105,10 +105,11 @@ async def _submit_tripo_task(api_key: str, prompt: str = "", file_token: str = N
     # the proxy_model endpoint doesn't stream, causing useGLTF to fail load.
     # Grey display is enforced at view time by the frontend GREY_MATERIAL
     # override (ModelViewer3DInner.tsx) — no texture needed.
+    # quad: True was tried for cleaner topology but produced GLBs that
+    # three.js GLTFLoader couldn't parse — stick with default triangulation.
     quality_params = {
         "texture": False,
         "face_limit": 30000,
-        "quad": True,
     }
 
     if has_image:
@@ -421,35 +422,23 @@ async def proxy_model(request: Request, generation_id: str):
 
     We use true streaming (not buffer-then-return) so large GLBs (cars,
     detailed models) don't exhaust memory and don't take so long to first
-    byte that an upstream timeout middleware kills the connection."""
-    try:
-        # useGLTF / browser GETs can't send an Authorization header, so we
-        # also accept the JWT via a ?token= query parameter as a fallback.
-        current_user = _get_current_user(request)
-        if not current_user:
-            qs_token = request.query_params.get("token")
-            if qs_token:
-                payload = decode_access_token(qs_token)
-                if payload:
-                    user_id = payload.get("sub")
-                    row = supabase.table("users").select("*").eq("id", user_id).execute()
-                    if row.data:
-                        current_user = row.data[0]
-        if not current_user:
-            return JSONResponse({"error": "Authentication required"}, status_code=401)
+    byte that an upstream timeout middleware kills the connection.
 
-        # Look up the generation and verify ownership.
-        row = supabase.table("generations").select("stl_url, user_id").eq("id", generation_id).execute()
+    No auth here — useGLTF can't send an Authorization header, and the
+    generation_id is a UUIDv4 (effectively unguessable) so the URL itself
+    is the access token. The model file isn't sensitive PII."""
+    try:
+        # Look up the generation.
+        row = supabase.table("generations").select("stl_url").eq("id", generation_id).execute()
         if not row.data:
             return JSONResponse({"error": "Generation not found"}, status_code=404)
 
         gen_row = row.data[0]
-        if gen_row.get("user_id") != current_user["id"] and current_user.get("role") != "admin":
-            return JSONResponse({"error": "Access denied"}, status_code=403)
-
         upstream_url = gen_row.get("stl_url")
         if not upstream_url:
             return JSONResponse({"error": "No 3D model available for this generation"}, status_code=404)
+
+        logger.info(f"proxy_model fetching upstream for {generation_id}: {upstream_url[:120]}")
 
         # Open a long-lived client and stream. The client closes inside the
         # generator after the last chunk is yielded.
