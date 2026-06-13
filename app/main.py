@@ -244,6 +244,11 @@ async def create_order(request: Request):
     return await OrderController.create_order(request)
 
 
+@app.post("/api/v1/orders/checkout")
+async def checkout_order(request: Request):
+    return await OrderController.checkout_order(request)
+
+
 @app.get("/api/v1/orders")
 async def list_orders(request: Request):
     return await OrderController.list_orders(request)

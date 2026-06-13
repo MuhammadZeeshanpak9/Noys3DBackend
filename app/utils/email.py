@@ -61,6 +61,45 @@ async def send_admin_new_order(order_id: str, customer_email: str, total: float,
     await send_email(settings.admin_email, subject, html)
 
 
+async def send_shop_order_confirmation(customer_email: str, order_id: str, total: float, items_summary: str):
+    subject = "Your Noys 3D Prints order is confirmed"
+    html = f"""
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+      <h1 style="color:#0c2a50">Order Confirmed!</h1>
+      <p>Thank you for your order — your payment has been received and we're getting it ready.</p>
+      <div style="background:#f0f4ff;border-radius:8px;padding:16px;margin:16px 0">
+        <p style="margin:4px 0"><strong>Order ID:</strong> {order_id[:8].upper()}</p>
+        <p style="margin:4px 0"><strong>Items:</strong> {items_summary}</p>
+        <p style="margin:4px 0"><strong>Total paid:</strong> £{total:.2f}</p>
+      </div>
+      <p>You can track your order at any time in <a href="{settings.frontend_url}/profile/history" style="color:#2563eb">My Orders</a>.</p>
+      <p style="color:#888;font-size:13px">Noys 3D Prints · noys3dprints.co.uk</p>
+    </div>
+    """
+    await send_email(customer_email, subject, html)
+
+
+async def send_admin_shop_order(order_id: str, customer_email: str, total: float, items_summary: str):
+    if not settings.admin_email:
+        return
+    subject = f"New shop order — £{total:.2f}"
+    html = f"""
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+      <h1 style="color:#0c2a50">New Shop Order</h1>
+      <div style="background:#f0f4ff;border-radius:8px;padding:16px;margin:16px 0">
+        <p style="margin:4px 0"><strong>Order ID:</strong> {order_id[:8].upper()}</p>
+        <p style="margin:4px 0"><strong>Customer:</strong> {customer_email}</p>
+        <p style="margin:4px 0"><strong>Items:</strong> {items_summary}</p>
+        <p style="margin:4px 0"><strong>Total:</strong> £{total:.2f}</p>
+      </div>
+      <a href="{settings.frontend_url}/admin/orders" style="background:#1a4073;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block">
+        View Orders
+      </a>
+    </div>
+    """
+    await send_email(settings.admin_email, subject, html)
+
+
 async def send_contact_message(name: str, from_email: str, message: str):
     if not settings.admin_email:
         return

@@ -53,8 +53,8 @@ async def _subscribe_to_plan_with_body(request: Request, current_user: dict, bod
 
     try:
         plan_id = body.get("plan_id") or body.get("item_id")
-        success_url = body.get("success_url", "https://noys-3d-print.vercel.app/payment?status=success")
-        cancel_url = body.get("cancel_url", "https://noys-3d-print.vercel.app/payment?status=cancelled")
+        success_url = body.get("success_url", f"{settings.frontend_url}/payment?status=success")
+        cancel_url = body.get("cancel_url", f"{settings.frontend_url}/payment?status=cancelled")
 
         if not plan_id:
             return JSONResponse({"error": "Plan ID is required"}, status_code=400)
@@ -140,8 +140,8 @@ async def _buy_credits_with_body(request: Request, current_user: dict, body: dic
 
     try:
         credit_pack_id = body.get("credit_pack_id") or body.get("item_id")
-        success_url = body.get("success_url", "https://noys-3d-print.vercel.app/payment?status=success")
-        cancel_url = body.get("cancel_url", "https://noys-3d-print.vercel.app/payment?status=cancelled")
+        success_url = body.get("success_url", f"{settings.frontend_url}/payment?status=success")
+        cancel_url = body.get("cancel_url", f"{settings.frontend_url}/payment?status=cancelled")
 
         if not credit_pack_id:
             return JSONResponse({"error": "Credit pack ID is required"}, status_code=400)
@@ -308,6 +308,34 @@ def _fulfil_completed_session(session: dict) -> dict:
                     "credits": current_credits + int(credits),
                     "updated_at": datetime.utcnow().isoformat(),
                 }).eq("id", user_id).execute()
+
+    elif payment_type == "shop_order":
+        order_id = metadata.get("order_id")
+        if order_id:
+            # Guard on awaiting_payment so a re-delivered webhook is a no-op
+            # (no duplicate emails / status flips).
+            order_resp = supabase.table("orders").update({
+                "status": "processing",
+                "updated_at": datetime.utcnow().isoformat(),
+            }).eq("id", order_id).eq("status", "awaiting_payment").execute()
+
+            if order_resp.data:
+                order_data = order_resp.data[0]
+                user_resp = supabase.table("users").select("email").eq("id", user_id).execute()
+                if user_resp.data:
+                    try:
+                        from app.utils.email import send_shop_order_confirmation, send_admin_shop_order
+                        import asyncio
+                        cust_email = user_resp.data[0]["email"]
+                        items = order_data.get("items") or []
+                        summary = ", ".join(
+                            f"{int(i.get('quantity', 1))}x {i.get('name', 'item')}" for i in items
+                        )
+                        total = float(order_data.get("total", 0))
+                        asyncio.create_task(send_shop_order_confirmation(cust_email, order_id, total, summary))
+                        asyncio.create_task(send_admin_shop_order(order_id, cust_email, total, summary))
+                    except Exception:
+                        pass
 
     elif payment_type == "custom_order":
         order_id = metadata.get("order_id")

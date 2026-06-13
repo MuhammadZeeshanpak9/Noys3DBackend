@@ -2,12 +2,20 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from app.db.connection import get_supabase_client
 from app.core.security import decode_access_token
+from app.core.config import get_settings
 from datetime import datetime
 from uuid import uuid4
 from typing import Optional
+import stripe as stripe_lib
 
 
 supabase = get_supabase_client()
+settings = get_settings()
+
+if settings.stripe_secret_key:
+    # .strip() — same defensive guard as the other payment controllers;
+    # trailing newlines pasted into a hosting dashboard corrupt the API key.
+    stripe_lib.api_key = settings.stripe_secret_key.strip()
 
 
 def _get_current_user(request: Request) -> Optional[dict]:
@@ -30,50 +38,125 @@ def _get_current_user(request: Request) -> Optional[dict]:
     return response.data[0]
 
 
+def _validate_items_total(items: list):
+    """Server-side price validation — never trust client-provided prices.
+    Returns (total, validated_items) or raises ValueError with a message.
+    """
+    total = 0.0
+    validated = []
+    for item in items:
+        product_id = item.get("id") or item.get("product_id")
+        qty = max(1, int(item.get("quantity", 1)))
+        name = item.get("name", "Item")
+        if product_id:
+            prod_resp = supabase.table("products").select("name, price").eq("id", product_id).execute()
+            if not prod_resp.data:
+                raise ValueError(f"Product not found: {product_id}")
+            unit_price = float(prod_resp.data[0]["price"])
+            name = prod_resp.data[0].get("name") or name
+        else:
+            unit_price = float(item.get("price", 0))
+        total += unit_price * qty
+        validated.append({
+            "id": product_id,
+            "name": name,
+            "price": unit_price,
+            "quantity": qty,
+            "image": item.get("image"),
+        })
+    return round(total, 2), validated
+
+
 async def create_order(request: Request):
-    
+    # Deprecated: this path created an order WITHOUT taking payment, which
+    # allowed "free" orders. The customer checkout now goes through
+    # checkout_order() (real Stripe). Kept only to return a clear error.
+    return JSONResponse(
+        {"error": "This endpoint is no longer available. Use /orders/checkout to place an order."},
+        status_code=410,
+    )
+
+
+async def checkout_order(request: Request):
+    """Create a shop order + real Stripe Checkout Session.
+    Mirrors CustomOrderController.initiate_checkout. The order is stored as
+    `awaiting_payment` and only flipped to `processing` by the Stripe webhook
+    (or verify-session) once payment actually completes."""
     try:
         current_user = _get_current_user(request)
         if not current_user:
             return JSONResponse({"error": "Authentication required"}, status_code=401)
-        
+
         body = await request.json()
         items = body.get("items", [])
         shipping_address = body.get("shipping_address")
-        
+
         if not items or not shipping_address:
             return JSONResponse({"error": "Items and shipping address are required"}, status_code=400)
 
-        # Validate prices server-side — never trust client-provided prices.
-        total = 0.0
-        for item in items:
-            product_id = item.get("id") or item.get("product_id")
-            qty = max(1, int(item.get("quantity", 1)))
-            if product_id:
-                prod_resp = supabase.table("products").select("price").eq("id", product_id).execute()
-                if not prod_resp.data:
-                    return JSONResponse({"error": f"Product not found: {product_id}"}, status_code=400)
-                total += float(prod_resp.data[0]["price"]) * qty
-            else:
-                total += float(item.get("price", 0)) * qty
-        
+        try:
+            total, validated_items = _validate_items_total(items)
+        except ValueError as ve:
+            return JSONResponse({"error": str(ve)}, status_code=400)
+
+        if total <= 0:
+            return JSONResponse({"error": "Order total must be greater than zero"}, status_code=400)
+
+        order_id = str(uuid4())
         order = {
-            "id": str(uuid4()),
+            "id": order_id,
             "user_id": current_user["id"],
-            "items": items,
+            "items": validated_items,
             "total": total,
-            "status": "pending",
+            "status": "awaiting_payment",
             "shipping_address": shipping_address,
             "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat()
+            "updated_at": datetime.utcnow().isoformat(),
         }
-        
-        response = supabase.table("orders").insert(order).execute()
-        return response.data[0]
+        supabase.table("orders").insert(order).execute()
+
+        # ── Stripe checkout session ───────────────────────────────────────────
+        if settings.stripe_secret_key:
+            try:
+                line_items = [{
+                    "price_data": {
+                        "currency": "gbp",
+                        "product_data": {"name": it["name"]},
+                        "unit_amount": int(round(it["price"] * 100)),
+                    },
+                    "quantity": it["quantity"],
+                } for it in validated_items]
+
+                session = stripe_lib.checkout.Session.create(
+                    payment_method_types=["card"],
+                    line_items=line_items,
+                    mode="payment",
+                    success_url=f"{settings.frontend_url}/orders/success?session_id={{CHECKOUT_SESSION_ID}}&order_id={order_id}&kind=shop",
+                    cancel_url=f"{settings.frontend_url}/checkout?cancelled=true",
+                    customer_email=current_user.get("email"),
+                    metadata={"order_id": order_id, "user_id": current_user["id"], "type": "shop_order"},
+                )
+                return {"checkout_url": session.url, "order_id": order_id}
+            except Exception as stripe_err:
+                # Clean up the awaiting_payment order on Stripe error
+                supabase.table("orders").delete().eq("id", order_id).execute()
+                return JSONResponse({"error": f"Payment setup failed: {str(stripe_err)}"}, status_code=500)
+
+        # Stripe not configured — activate immediately (dev/test mode only)
+        supabase.table("orders").update({"status": "processing"}).eq("id", order_id).execute()
+        try:
+            from app.utils.email import send_shop_order_confirmation, send_admin_shop_order
+            import asyncio
+            summary = ", ".join(f"{it['quantity']}x {it['name']}" for it in validated_items)
+            asyncio.create_task(send_shop_order_confirmation(current_user["email"], order_id, total, summary))
+            asyncio.create_task(send_admin_shop_order(order_id, current_user["email"], total, summary))
+        except Exception:
+            pass
+        return {"checkout_url": None, "order_id": order_id}
     except Exception as e:
         import logging
-        logging.error(f"create_order error: {e}")
-        return JSONResponse({"error": "Failed to create order"}, status_code=500)
+        logging.error(f"checkout_order error: {e}")
+        return JSONResponse({"error": "Failed to start checkout"}, status_code=500)
 
 
 async def list_orders(request: Request):
