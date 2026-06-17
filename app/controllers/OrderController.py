@@ -115,6 +115,14 @@ async def checkout_order(request: Request):
         }
         supabase.table("orders").insert(order).execute()
 
+        # Prefer the caller's origin (passed by the frontend) so the redirect
+        # returns to the same domain the buyer is on — independent of the
+        # FRONTEND_URL env var. Falls back to settings.frontend_url.
+        base_success = body.get("success_url") or f"{settings.frontend_url}/orders/success"
+        base_cancel = body.get("cancel_url") or f"{settings.frontend_url}/checkout?cancelled=true"
+        sep = "&" if "?" in base_success else "?"
+        success_url = f"{base_success}{sep}session_id={{CHECKOUT_SESSION_ID}}&order_id={order_id}&kind=shop"
+
         # ── Stripe checkout session ───────────────────────────────────────────
         if settings.stripe_secret_key:
             try:
@@ -131,8 +139,8 @@ async def checkout_order(request: Request):
                     payment_method_types=["card"],
                     line_items=line_items,
                     mode="payment",
-                    success_url=f"{settings.frontend_url}/orders/success?session_id={{CHECKOUT_SESSION_ID}}&order_id={order_id}&kind=shop",
-                    cancel_url=f"{settings.frontend_url}/checkout?cancelled=true",
+                    success_url=success_url,
+                    cancel_url=base_cancel,
                     customer_email=current_user.get("email"),
                     metadata={"order_id": order_id, "user_id": current_user["id"], "type": "shop_order"},
                 )
