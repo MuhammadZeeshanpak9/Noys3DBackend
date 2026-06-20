@@ -98,11 +98,13 @@ class TimeoutMiddleware(BaseHTTPMiddleware):
         import asyncio
 
         # Endpoints that legitimately stream large bodies (model proxy, file
-        # uploads) must not be killed at 30s — they can take much longer for
-        # multi-MB binary payloads, and aborting mid-stream produces
-        # ERR_CONNECTION_RESET in the browser.
+        # uploads, AI generation requests) must not be killed at 30s — they can
+        # take much longer for multi-MB binary payloads, and aborting mid-stream
+        # produces ERR_CONNECTION_RESET in the browser. The generate endpoint
+        # itself returns fast, but a slow client uploading a large reference
+        # image can spend >30s just transferring the multipart body.
         path = request.url.path
-        if path.endswith("/model") or "/upload/" in path:
+        if path.endswith("/model") or "/upload/" in path or path.endswith("/generations/generate"):
             return await call_next(request)
 
         try:

@@ -315,8 +315,8 @@ async def get_gallery(request: Request):
 
 
 @app.get("/api/v1/generations/{generation_id}")
-async def get_generation(request: Request, generation_id: str):
-    return await GenerationController.get_generation(request, generation_id)
+async def get_generation(request: Request, generation_id: str, background_tasks: BackgroundTasks):
+    return await GenerationController.get_generation(request, generation_id, background_tasks)
 
 
 @app.get("/api/v1/generations/{generation_id}/model")
