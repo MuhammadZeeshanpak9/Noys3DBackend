@@ -17,6 +17,13 @@ settings = get_settings()
 
 TRIPO_API_BASE = "https://api.tripo3d.ai/v2/openapi"
 
+# Tripo model versions are date-stamped enum strings — a bare "v3.0" is rejected
+# by the /task endpoint. Valid values include v2.5-20250123 (old default),
+# v3.0-20250812, v3.1-20260211. Kept as one constant so it's a single place to
+# bump or revert. If generation ever breaks on a version, fall back to
+# "v2.5-20250123" which is the known-good default.
+TRIPO_MODEL_VERSION = "v3.0-20250812"
+
 # Maps generation_id → tripo task_id for in-progress generations.
 _active_tasks: dict = {}
 # Maps generation_id → last known Tripo progress (0-100).
@@ -120,7 +127,7 @@ async def _submit_tripo_task(api_key: str, prompt: str = "", file_token: str = N
         tripo_type = "png" if file_ext in ("png",) else "jpeg"
         payload = {
             "type": "image_to_model",
-            "model_version": "v3.0",
+            "model_version": TRIPO_MODEL_VERSION,
             "file": {"type": tripo_type, "file_token": file_token},
             "prompt": IMAGE_STYLE_SUFFIX,
             **quality_params,
@@ -128,7 +135,7 @@ async def _submit_tripo_task(api_key: str, prompt: str = "", file_token: str = N
     else:
         payload = {
             "type": "text_to_model",
-            "model_version": "v3.0",
+            "model_version": TRIPO_MODEL_VERSION,
             "prompt": prompt + STYLE_SUFFIX,
             **quality_params,
         }
