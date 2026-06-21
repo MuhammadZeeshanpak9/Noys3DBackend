@@ -22,7 +22,7 @@ TRIPO_API_BASE = "https://api.tripo3d.ai/v2/openapi"
 # v3.0-20250812, v3.1-20260211. Kept as one constant so it's a single place to
 # bump or revert. If generation ever breaks on a version, fall back to
 # "v2.5-20250123" which is the known-good default.
-TRIPO_MODEL_VERSION = "v3.0-20250812"
+TRIPO_MODEL_VERSION = "v2.5-20250123"
 
 # Maps generation_id → tripo task_id for in-progress generations.
 _active_tasks: dict = {}
