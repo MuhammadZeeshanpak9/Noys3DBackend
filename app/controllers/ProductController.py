@@ -299,6 +299,7 @@ async def create_product(request: Request):
 
         media = body.pop("media", None)
         colours = body.pop("colours", None)
+        scale_variations = body.pop("scale_variations", None)
 
         # Derive thumbnail (image_url) from the first image in media[] if not provided.
         image_url = body.get("image_url")
@@ -317,6 +318,7 @@ async def create_product(request: Request):
             "image_url": image_url,
             "category_id": category_id or body.get("category_id"),
             "is_active": is_active,
+            "scale_variations": scale_variations,
             "created_at": datetime.utcnow().isoformat(),
             "updated_at": datetime.utcnow().isoformat()
         }
@@ -362,6 +364,8 @@ async def update_product(request: Request, product_id: str):
 
         media = body.pop("media", None)
         colours = body.pop("colours", None)
+        _scale_provided = "scale_variations" in body
+        scale_variations = body.pop("scale_variations", None)
 
         # If client sent media[] but no explicit image_url, sync the thumbnail
         # to the first image so shop cards stay accurate.
@@ -374,6 +378,8 @@ async def update_product(request: Request, product_id: str):
 
         update_data = {k: v for k, v in body.items() if v is not None or k == "image_url"}
         update_data["updated_at"] = datetime.utcnow().isoformat()
+        if _scale_provided:
+            update_data["scale_variations"] = scale_variations  # allow None to disable
 
         import logging
         logging.info(f"Updating product {product_id} with data: {update_data}")

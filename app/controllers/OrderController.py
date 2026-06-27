@@ -48,22 +48,37 @@ def _validate_items_total(items: list):
         product_id = item.get("id") or item.get("product_id")
         qty = max(1, int(item.get("quantity", 1)))
         name = item.get("name", "Item")
+        scale_label = item.get("scale_label")
+        colour = item.get("colour")
         if product_id:
-            prod_resp = supabase.table("products").select("name, price").eq("id", product_id).execute()
+            prod_resp = supabase.table("products").select("name, price, scale_variations").eq("id", product_id).execute()
             if not prod_resp.data:
                 raise ValueError(f"Product not found: {product_id}")
-            unit_price = float(prod_resp.data[0]["price"])
-            name = prod_resp.data[0].get("name") or name
+            prod = prod_resp.data[0]
+            name = prod.get("name") or name
+            scale_vars = prod.get("scale_variations") or {}
+            if scale_label and scale_vars.get("enabled") and scale_vars.get("scales"):
+                match = next((s for s in scale_vars["scales"] if s["label"] == scale_label), None)
+                if not match:
+                    raise ValueError(f"Scale '{scale_label}' not found for product: {product_id}")
+                unit_price = float(match["price"])
+            else:
+                unit_price = float(prod["price"])
         else:
             unit_price = float(item.get("price", 0))
         total += unit_price * qty
-        validated.append({
+        validated_item: dict = {
             "id": product_id,
             "name": name,
             "price": unit_price,
             "quantity": qty,
             "image": item.get("image"),
-        })
+        }
+        if colour:
+            validated_item["colour"] = colour
+        if scale_label:
+            validated_item["scale_label"] = scale_label
+        validated.append(validated_item)
     return round(total, 2), validated
 
 

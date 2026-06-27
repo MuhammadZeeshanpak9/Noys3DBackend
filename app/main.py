@@ -6,6 +6,7 @@ from fastapi import UploadFile, File, Form
 from app.core.config import get_settings
 from app.controllers import AuthController, ProductController, PlanController, OrderController, PaymentController, GenerationController, AdminController, UserController
 from app.controllers import ModelSizeController, FinishOptionController, PaintingTierController, PaintColorController, PricingController, DeliveryController, CustomOrderController
+from app.controllers import ColourPresetController
 from app.middleware.rate_limiter import RateLimiter, CacheMiddleware
 from app.middleware.logging import RequestLoggingMiddleware, TimeoutMiddleware
 import os
@@ -676,6 +677,26 @@ async def review_custom_order(request: Request, order_id: str):
 @app.post("/api/v1/admin/custom-orders/{order_id}/notes")
 async def add_custom_order_note(request: Request, order_id: str):
     return await CustomOrderController.add_order_note(request, order_id)
+
+
+# ============================================================
+# COLOUR PRESETS
+# ============================================================
+@app.get("/api/v1/colour-presets")
+async def list_colour_presets():
+    return await ColourPresetController.list_presets()
+
+@app.post("/api/v1/colour-presets")
+async def create_colour_preset(request: Request):
+    return await ColourPresetController.create_preset(request)
+
+@app.put("/api/v1/colour-presets/{preset_id}")
+async def update_colour_preset(request: Request, preset_id: str):
+    return await ColourPresetController.update_preset(request, preset_id)
+
+@app.delete("/api/v1/colour-presets/{preset_id}")
+async def delete_colour_preset(request: Request, preset_id: str):
+    return await ColourPresetController.delete_preset(request, preset_id)
 
 
 @app.exception_handler(Exception)
