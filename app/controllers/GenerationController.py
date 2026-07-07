@@ -45,31 +45,6 @@ IMAGE_STYLE_SUFFIX = (
     "clean topology, and fine surface relief. Single isolated object."
 )
 
-# Keywords that signal a person/character subject — when matched, we pass
-# Tripo's `person:person2cartoon` style preset which produces the caricature
-# figurine look in the client's reference images.
-PERSON_KEYWORDS = {
-    "person", "people", "man", "woman", "boy", "girl", "child", "kid",
-    "character", "hero", "figure", "miniature", "human", "lady", "guy",
-    "knight", "soldier", "wizard", "warrior", "king", "queen", "prince",
-    "princess", "elf", "dwarf", "orc", "monk", "ninja", "samurai",
-    "guard", "fairy", "angel", "demon", "father", "mother", "son",
-    "daughter", "doctor", "nurse", "officer", "chef", "pilot",
-    "athlete", "dancer", "worker", "gallerist", "portrait", "bust",
-}
-
-
-def _detect_person_subject(prompt: str, has_image: bool) -> bool:
-    """Apply the person-cartoon style only when the prompt text actually names a
-    person. Previously this returned True for ANY image-only upload, which wrongly
-    forced the person2cartoon preset onto photos of vehicles, buildings and
-    objects — producing cartoon characters instead of a faithful model."""
-    if not prompt:
-        return False
-    lower = prompt.lower()
-    return any(kw in lower for kw in PERSON_KEYWORDS)
-
-
 def _get_current_user(request: Request) -> Optional[dict]:
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
@@ -109,18 +84,18 @@ async def _submit_tripo_task(api_key: str, prompt: str = "", file_token: str = N
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     has_image = bool(file_token)
-    is_person = _detect_person_subject(prompt, has_image)
 
     # Quality params shared by both pathways. We keep texture: False because
     # PBR-textured GLBs from Tripo can reference external texture files that
     # the proxy_model endpoint doesn't stream, causing useGLTF to fail load.
-    # Grey display is enforced at view time by the frontend GREY_MATERIAL
+    # Grey display is enforced at view time by the frontend clay-matcap
     # override (ModelViewer3DInner.tsx) — no texture needed.
+    # No face_limit: the old 30k cap visibly faceted humanoid models; leaving
+    # it unset lets Tripo pick the density the model version supports.
     # quad: True was tried for cleaner topology but produced GLBs that
     # three.js GLTFLoader couldn't parse — stick with default triangulation.
     quality_params = {
         "texture": False,
-        "face_limit": 30000,
     }
 
     if has_image:
@@ -139,9 +114,6 @@ async def _submit_tripo_task(api_key: str, prompt: str = "", file_token: str = N
             "prompt": prompt + STYLE_SUFFIX,
             **quality_params,
         }
-
-    if is_person:
-        payload["style"] = "person:person2cartoon"
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
