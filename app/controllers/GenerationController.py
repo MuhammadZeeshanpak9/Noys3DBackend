@@ -18,11 +18,12 @@ settings = get_settings()
 TRIPO_API_BASE = "https://api.tripo3d.ai/v2/openapi"
 
 # Tripo model versions are date-stamped enum strings — a bare "v3.0" is rejected
-# by the /task endpoint. Valid values include v2.5-20250123 (old default),
-# v3.0-20250812, v3.1-20260211. Kept as one constant so it's a single place to
-# bump or revert. If generation ever breaks on a version, fall back to
-# "v2.5-20250123" which is the known-good default.
-TRIPO_MODEL_VERSION = "v3.0-20250812"
+# by the /task endpoint. Valid values include v2.5-20250123 (Tripo's default
+# when unset — never leave this unset), v3.0-20250812, v3.1-20260211, and
+# P1-20260311 (their production-grade model, untested here). Kept as one
+# constant so it's a single place to bump or revert. If generation ever breaks
+# on a version, fall back to "v2.5-20250123" which is the known-good baseline.
+TRIPO_MODEL_VERSION = "v3.1-20260211"
 
 # Maps generation_id → tripo task_id for in-progress generations.
 _active_tasks: dict = {}
@@ -92,10 +93,15 @@ async def _submit_tripo_task(api_key: str, prompt: str = "", file_token: str = N
     # override (ModelViewer3DInner.tsx) — no texture needed.
     # No face_limit: the old 30k cap visibly faceted humanoid models; leaving
     # it unset lets Tripo pick the density the model version supports.
+    # geometry_quality "detailed" (valid for >= v3.0-20250812) is what Tripo's
+    # own studio uses for its high-detail sculpts — "standard" was a large part
+    # of the quality gap vs their site. Slower to generate but well inside the
+    # 10-minute polling window.
     # quad: True was tried for cleaner topology but produced GLBs that
     # three.js GLTFLoader couldn't parse — stick with default triangulation.
     quality_params = {
         "texture": False,
+        "geometry_quality": "detailed",
     }
 
     if has_image:
