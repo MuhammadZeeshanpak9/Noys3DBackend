@@ -22,7 +22,7 @@ async def send_email(to: str, subject: str, html: str):
         logger.error(f"Email send failed to {to}: {e}")
 
 
-async def send_order_confirmation(customer_email: str, order_id: str, total: float, size_mm: int, finish_name: str):
+async def send_order_confirmation(customer_email: str, order_id: str, total: float, size_label: str, finish_name: str):
     subject = "Your Noys 3D Prints order has been received"
     html = f"""
     <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
@@ -30,7 +30,7 @@ async def send_order_confirmation(customer_email: str, order_id: str, total: flo
       <p>Thank you for your order. We'll review your image and get in touch before production begins.</p>
       <div style="background:#f0f4ff;border-radius:8px;padding:16px;margin:16px 0">
         <p style="margin:4px 0"><strong>Order ID:</strong> {order_id[:8].upper()}</p>
-        <p style="margin:4px 0"><strong>Configuration:</strong> {size_mm}mm — {finish_name}</p>
+        <p style="margin:4px 0"><strong>Configuration:</strong> {size_label} — {finish_name}</p>
         <p style="margin:4px 0"><strong>Total paid:</strong> £{total:.2f}</p>
       </div>
       <p>You can track your order status at any time in <a href="{settings.frontend_url}/profile/history" style="color:#2563eb">My Orders</a>.</p>
@@ -40,7 +40,7 @@ async def send_order_confirmation(customer_email: str, order_id: str, total: flo
     await send_email(customer_email, subject, html)
 
 
-async def send_admin_new_order(order_id: str, customer_email: str, total: float, size_mm: int, finish_name: str):
+async def send_admin_new_order(order_id: str, customer_email: str, total: float, size_label: str, finish_name: str):
     if not settings.admin_email:
         return
     subject = f"New custom order — £{total:.2f}"
@@ -50,7 +50,7 @@ async def send_admin_new_order(order_id: str, customer_email: str, total: float,
       <div style="background:#f0f4ff;border-radius:8px;padding:16px;margin:16px 0">
         <p style="margin:4px 0"><strong>Order ID:</strong> {order_id[:8].upper()}</p>
         <p style="margin:4px 0"><strong>Customer:</strong> {customer_email}</p>
-        <p style="margin:4px 0"><strong>Configuration:</strong> {size_mm}mm — {finish_name}</p>
+        <p style="margin:4px 0"><strong>Configuration:</strong> {size_label} — {finish_name}</p>
         <p style="margin:4px 0"><strong>Total:</strong> £{total:.2f}</p>
       </div>
       <a href="{settings.frontend_url}/admin/custom-orders/{order_id}" style="background:#1a4073;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block">

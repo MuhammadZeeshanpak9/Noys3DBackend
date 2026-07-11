@@ -356,13 +356,13 @@ def _fulfil_completed_session(session: dict) -> dict:
                         asyncio.create_task(send_order_confirmation(
                             cust_email, order_id,
                             float(order_data.get("total", 0)),
-                            int(order_data.get("size_mm", 0)),
+                            order_data.get("size_label", ""),
                             order_data.get("finish_name", ""),
                         ))
                         asyncio.create_task(send_admin_new_order(
                             order_id, cust_email,
                             float(order_data.get("total", 0)),
-                            int(order_data.get("size_mm", 0)),
+                            order_data.get("size_label", ""),
                             order_data.get("finish_name", ""),
                         ))
                     except Exception:

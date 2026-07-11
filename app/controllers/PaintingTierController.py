@@ -22,7 +22,7 @@ async def list_tiers():
         # Fetch mappings with size details for each tier
         for tier in tiers:
             mappings_response = supabase.table("painting_tier_mappings").select(
-                "*, model_sizes(id, size_mm, price)"
+                "*, model_sizes(id, size_label, price)"
             ).eq("painting_tier_id", tier["id"]).execute()
             tier["size_mappings"] = mappings_response.data or []
 
@@ -41,7 +41,7 @@ async def get_tier(tier_id: str):
         tier = tier_response.data[0]
 
         mappings_response = supabase.table("painting_tier_mappings").select(
-            "*, model_sizes(id, size_mm, price)"
+            "*, model_sizes(id, size_label, price)"
         ).eq("painting_tier_id", tier_id).execute()
         tier["size_mappings"] = mappings_response.data or []
 

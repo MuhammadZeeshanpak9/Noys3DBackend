@@ -149,7 +149,7 @@ async def create_custom_order(request: Request):
             "generation_id": body.get("generation_id"),
             "image_source": body["image_source"],
             "model_size_id": body["model_size_id"],
-            "size_mm": size["size_mm"],
+            "size_label": size["size_label"],
             "size_price": size_price,
             "finish_option_id": body["finish_option_id"],
             "finish_name": finish["name"],
@@ -190,8 +190,8 @@ async def create_custom_order(request: Request):
         try:
             from app.utils.email import send_order_confirmation, send_admin_new_order
             import asyncio
-            asyncio.create_task(send_order_confirmation(user["email"], order_id, total, size["size_mm"], finish["name"]))
-            asyncio.create_task(send_admin_new_order(order_id, user["email"], total, size["size_mm"], finish["name"]))
+            asyncio.create_task(send_order_confirmation(user["email"], order_id, total, size["size_label"], finish["name"]))
+            asyncio.create_task(send_admin_new_order(order_id, user["email"], total, size["size_label"], finish["name"]))
         except Exception:
             pass
 
@@ -306,7 +306,7 @@ async def initiate_checkout(request: Request):
             "generation_id": body.get("generation_id"),
             "image_source": body["image_source"],
             "model_size_id": body["model_size_id"],
-            "size_mm": size["size_mm"],
+            "size_label": size["size_label"],
             "size_price": size_price,
             "finish_option_id": body["finish_option_id"],
             "finish_name": finish["name"],
@@ -347,7 +347,7 @@ async def initiate_checkout(request: Request):
                         "price_data": {
                             "currency": "gbp",
                             "product_data": {
-                                "name": f"Custom 3D Print — {size['size_mm']}mm {finish['name']}",
+                                "name": f"Custom 3D Print — {size['size_label']} {finish['name']}",
                             },
                             "unit_amount": int(total * 100),
                         },
@@ -370,8 +370,8 @@ async def initiate_checkout(request: Request):
         try:
             from app.utils.email import send_order_confirmation, send_admin_new_order
             import asyncio
-            asyncio.create_task(send_order_confirmation(user["email"], order_id, total, size["size_mm"], finish["name"]))
-            asyncio.create_task(send_admin_new_order(order_id, user["email"], total, size["size_mm"], finish["name"]))
+            asyncio.create_task(send_order_confirmation(user["email"], order_id, total, size["size_label"], finish["name"]))
+            asyncio.create_task(send_admin_new_order(order_id, user["email"], total, size["size_label"], finish["name"]))
         except Exception:
             pass
         return {"checkout_url": None, "order_id": order_id}

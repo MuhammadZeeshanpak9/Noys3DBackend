@@ -1,5 +1,5 @@
 """
-Model Size Controller — CRUD for the 12 model sizes with individually editable prices.
+Model Size Controller — CRUD for model sizes (scale labels, e.g. "1:12 Scale") with individually editable prices.
 """
 
 from fastapi import Request
@@ -13,7 +13,7 @@ supabase = get_supabase_client()
 
 
 async def list_sizes(active_only: bool = True):
-    """List all model sizes, ordered by size_mm."""
+    """List all model sizes, ordered by sort_order."""
     try:
         query = supabase.table("model_sizes").select("*")
         if active_only:
@@ -43,15 +43,15 @@ async def create_size(request: Request):
             return admin_error_response()
 
         body = await request.json()
-        size_mm = body.get("size_mm")
+        size_label = body.get("size_label")
         price = body.get("price")
 
-        if not size_mm or price is None:
-            return JSONResponse({"error": "size_mm and price are required"}, status_code=400)
+        if not size_label or price is None:
+            return JSONResponse({"error": "size_label and price are required"}, status_code=400)
 
         size = {
             "id": str(uuid4()),
-            "size_mm": int(size_mm),
+            "size_label": str(size_label).strip(),
             "price": float(price),
             "is_on_sale": body.get("is_on_sale", False),
             "sale_price": body.get("sale_price"),
@@ -75,7 +75,7 @@ async def update_size(request: Request, size_id: str):
             return admin_error_response()
 
         body = await request.json()
-        allowed_fields = ["size_mm", "price", "is_on_sale", "sale_price", "is_active", "sort_order"]
+        allowed_fields = ["size_label", "price", "is_on_sale", "sale_price", "is_active", "sort_order"]
         update_data = {k: v for k, v in body.items() if k in allowed_fields and v is not None}
 
         if not update_data:

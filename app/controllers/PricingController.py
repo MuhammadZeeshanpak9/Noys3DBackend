@@ -160,7 +160,7 @@ async def calculate_price(request: Request):
         return {
             "size": {
                 "id": size["id"],
-                "size_mm": size["size_mm"],
+                "size_label": size["size_label"],
                 "price": size_price,
                 "is_on_sale": size_is_sale
             },
