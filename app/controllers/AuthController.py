@@ -44,14 +44,17 @@ async def signup(request: Request):
 
         user_id = str(uuid4())
         password_hash = get_password_hash(password)
-        
+
+        settings_resp = supabase.table("app_settings").select("default_free_credits").limit(1).execute()
+        default_credits = settings_resp.data[0]["default_free_credits"] if settings_resp.data else 15
+
         user = {
             "id": user_id,
             "email": email,
             "password_hash": password_hash,
             "name": name,
             "role": "user",
-            "credits": 15,
+            "credits": default_credits,
             "subscription_plan": "starter",
             "created_at": datetime.utcnow().isoformat(),
             "updated_at": datetime.utcnow().isoformat()

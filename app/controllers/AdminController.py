@@ -233,14 +233,17 @@ async def get_recent_activity(request: Request, limit: int = 20):
 
 
 async def get_settings(request: Request):
-    
+
     try:
         admin = _get_current_admin(request)
         if not admin:
             return JSONResponse({"error": "Admin access required"}, status_code=403)
-        
+
+        response = supabase.table("app_settings").select("*").limit(1).execute()
+        default_free_credits = response.data[0]["default_free_credits"] if response.data else 15
+
         return {
-            "default_free_credits": 15,
+            "default_free_credits": default_free_credits,
             "stripe_configured": bool(settings.stripe_secret_key),
             "ai_service_configured": False
         }
@@ -249,11 +252,26 @@ async def get_settings(request: Request):
 
 
 async def update_settings(request: Request):
-    
+
     try:
         admin = _get_current_admin(request)
         if not admin:
             return JSONResponse({"error": "Admin access required"}, status_code=403)
+
+        body = await request.json()
+        credits_value = body.get("default_free_credits")
+        if credits_value is None:
+            return JSONResponse({"error": "default_free_credits is required"}, status_code=400)
+
+        update_data = {
+            "default_free_credits": int(credits_value),
+            "updated_at": datetime.utcnow().isoformat()
+        }
+        existing = supabase.table("app_settings").select("id").limit(1).execute()
+        if existing.data:
+            supabase.table("app_settings").update(update_data).eq("id", existing.data[0]["id"]).execute()
+        else:
+            supabase.table("app_settings").insert(update_data).execute()
 
         return {"message": "Settings updated successfully"}
     except Exception as e:
