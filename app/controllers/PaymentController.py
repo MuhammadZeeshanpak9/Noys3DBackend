@@ -313,9 +313,10 @@ def _fulfil_completed_session(session: dict) -> dict:
         order_id = metadata.get("order_id")
         if order_id:
             # Guard on awaiting_payment so a re-delivered webhook is a no-op
-            # (no duplicate emails / status flips).
+            # (no duplicate emails / status flips). Lands on "pending" (New
+            # Orders tab) — admin manually moves it to "processing" from there.
             order_resp = supabase.table("orders").update({
-                "status": "processing",
+                "status": "pending",
                 "updated_at": datetime.utcnow().isoformat(),
             }).eq("id", order_id).eq("status", "awaiting_payment").execute()
 

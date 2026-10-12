@@ -95,8 +95,8 @@ async def create_order(request: Request):
 async def checkout_order(request: Request):
     """Create a shop order + real Stripe Checkout Session.
     Mirrors CustomOrderController.initiate_checkout. The order is stored as
-    `awaiting_payment` and only flipped to `processing` by the Stripe webhook
-    (or verify-session) once payment actually completes."""
+    `awaiting_payment` and only flipped to `pending` (New Orders tab) by the
+    Stripe webhook (or verify-session) once payment actually completes."""
     try:
         current_user = _get_current_user(request)
         if not current_user:
@@ -110,18 +110,29 @@ async def checkout_order(request: Request):
             return JSONResponse({"error": "Items and shipping address are required"}, status_code=400)
 
         try:
-            total, validated_items = _validate_items_total(items)
+            subtotal, validated_items = _validate_items_total(items)
         except ValueError as ve:
             return JSONResponse({"error": str(ve)}, status_code=400)
 
-        if total <= 0:
+        if subtotal <= 0:
             return JSONResponse({"error": "Order total must be greater than zero"}, status_code=400)
+
+        # Delivery — same rule as the custom/builder flow (CustomOrderController).
+        ds = supabase.table("delivery_settings").select("*").limit(1).execute()
+        threshold = 50.0
+        std_delivery = 4.99
+        if ds.data:
+            threshold = float(ds.data[0].get("free_delivery_threshold", 50))
+            std_delivery = float(ds.data[0].get("standard_delivery_price", 4.99))
+        delivery_price = 0.0 if subtotal >= threshold else std_delivery
+        total = round(subtotal + delivery_price, 2)
 
         order_id = str(uuid4())
         order = {
             "id": order_id,
             "user_id": current_user["id"],
             "items": validated_items,
+            "delivery_price": delivery_price,
             "total": total,
             "status": "awaiting_payment",
             "shipping_address": shipping_address,
@@ -150,6 +161,16 @@ async def checkout_order(request: Request):
                     "quantity": it["quantity"],
                 } for it in validated_items]
 
+                if delivery_price > 0:
+                    line_items.append({
+                        "price_data": {
+                            "currency": "gbp",
+                            "product_data": {"name": "Delivery"},
+                            "unit_amount": int(round(delivery_price * 100)),
+                        },
+                        "quantity": 1,
+                    })
+
                 session = stripe_lib.checkout.Session.create(
                     payment_method_types=["card"],
                     line_items=line_items,
@@ -165,8 +186,9 @@ async def checkout_order(request: Request):
                 supabase.table("orders").delete().eq("id", order_id).execute()
                 return JSONResponse({"error": f"Payment setup failed: {str(stripe_err)}"}, status_code=500)
 
-        # Stripe not configured — activate immediately (dev/test mode only)
-        supabase.table("orders").update({"status": "processing"}).eq("id", order_id).execute()
+        # Stripe not configured — activate immediately (dev/test mode only).
+        # Lands on "pending" (New Orders tab), matching the webhook path.
+        supabase.table("orders").update({"status": "pending"}).eq("id", order_id).execute()
         try:
             from app.utils.email import send_shop_order_confirmation, send_admin_shop_order
             import asyncio
